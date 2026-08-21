@@ -683,95 +683,85 @@ enum FeatureCatalogTests {
                 && !FanControlPolicy.forceTestSatisfied(keyExists: true, writeSucceeded: false),
                "the manual-mode fallback needs the force-test override only where the Mac exposes it")
 
-        let defaultCurve = FanControlConfiguration.defaultCurve
         suite.expect(FanControlPolicy.validConfiguration(.manual(level: 0))
                 && FanControlPolicy.validConfiguration(.manual(level: 100))
-                && FanControlPolicy.validConfiguration(.curve([defaultCurve]))
-                && FanControlPolicy.interpolatedCoolingLevel(points: defaultCurve.points,
-                                                             temperature: 40) == 0
-                && FanControlPolicy.interpolatedCoolingLevel(points: defaultCurve.points,
-                                                             temperature: 60) == 50
-                && FanControlPolicy.interpolatedCoolingLevel(points: defaultCurve.points,
-                                                             temperature: 61) == 55
-                && FanControlPolicy.interpolatedCoolingLevel(points: defaultCurve.points,
-                                                             temperature: 80) == 100,
-               "the default curve starts at 50 degrees, reaches maximum at 70 and rounds safely up")
-        let coolingTemperature = [
-            FanControlTemperatureReading(source: .hottestSoC, celsius: 59),
+                && FanControlPolicy.validConfiguration(.curve())
+                && !FanControlPolicy.validConfiguration(
+                    .curve(threshold: 20, accelerationFactor: 1))
+                && !FanControlPolicy.validConfiguration(
+                    .curve(threshold: 68, accelerationFactor: 3)),
+               "curve control accepts a bounded start temperature and 0.5x to 2.0x acceleration")
+        let midpoint = [
+            FanControlTemperatureReading(source: .hottestCPU, celsius: 79),
         ]
-        suite.expect(FanControlPolicy.curveCoolingLevel(curves: [defaultCurve],
-                                                  temperatures: coolingTemperature,
-                                                  previousLevel: 50) == 50
-                && FanControlPolicy.curveCoolingLevel(
-                    curves: [defaultCurve],
-                    temperatures: [.init(source: .hottestSoC, celsius: 57)],
-                    previousLevel: 50
-                ) == 45,
-               "a cooling curve uses two-degree hysteresis before lowering fan speed")
-        let cpuCurve = FanControlCurve(
-            sensor: .averageCPU,
-            points: [FanControlCurvePoint(temperature: 40, coolingLevel: 0),
-                     FanControlCurvePoint(temperature: 80, coolingLevel: 80)]
-        )
-        let curveTemperatures = [
-            FanControlTemperatureReading(source: .hottestSoC, celsius: 54),
-            FanControlTemperatureReading(source: .averageCPU, celsius: 70),
+        suite.expect(FanControlPolicy.curveDemand(sensor: .hottestCPU, threshold: 68,
+                                            accelerationFactor: 1,
+                                            temperatures: midpoint) == .cooling(50)
+                && FanControlPolicy.curveDemand(sensor: .hottestCPU, threshold: 68,
+                                                accelerationFactor: 2,
+                                                temperatures: midpoint) == .cooling(70)
+                && FanControlPolicy.curveDemand(sensor: .hottestCPU, threshold: 68,
+                                                accelerationFactor: 0.5,
+                                                temperatures: midpoint) == .cooling(25),
+               "acceleration reshapes the midpoint of the 68 to 90 degree curve")
+        suite.expect(FanControlPolicy.curveDemand(sensor: .hottestCPU, threshold: 68,
+                                            accelerationFactor: 1,
+                                            temperatures: [.init(source: .hottestCPU, celsius: 67)])
+                == .belowThreshold
+                && FanControlPolicy.curveDemand(sensor: .hottestCPU, threshold: 68,
+                                                accelerationFactor: 1,
+                                                temperatures: [.init(source: .hottestCPU, celsius: 90)])
+                == .cooling(100)
+                && FanControlPolicy.curveDemand(sensor: .packageCPU, threshold: 68,
+                                                accelerationFactor: 1,
+                                                temperatures: midpoint)
+                == .unavailable,
+               "the curve stays off below the start temperature, reaches maximum at 90, and needs its sensor")
+        suite.expect(FanControlPolicy.curveDemand(sensor: .hottestCPU, threshold: 68,
+                                            accelerationFactor: 1,
+                                            temperatures: [.init(source: .hottestCPU, celsius: 66)],
+                                            previousLevel: 50) == .cooling(0)
+                && FanControlPolicy.curveDemand(sensor: .hottestCPU, threshold: 68,
+                                                accelerationFactor: 1,
+                                                temperatures: [.init(source: .hottestCPU, celsius: 64)],
+                                                previousLevel: 50) == .belowThreshold,
+               "an active curve uses three-degree hysteresis before returning to system control")
+        let takeoverFans = [
+            FanControlFanReading(index: 0, actualRPM: 2_000, minimumRPM: 1_200,
+                                 maximumRPM: 5_800, targetRPM: 2_000,
+                                 isManuallyControlled: false)
         ]
-        suite.expect(FanControlPolicy.curveCoolingLevel(curves: [defaultCurve, cpuCurve],
-                                                  temperatures: curveTemperatures) == 60
-                && FanControlPolicy.curveCoolingLevel(curves: [defaultCurve, cpuCurve],
-                                                      temperatures: [curveTemperatures[0]]) == nil,
-               "several temperature rules use their highest demand and require every selected sensor")
+        suite.expect(!FanControlPolicy.shouldTakeOver(level: 0, fans: takeoverFans)
+                && FanControlPolicy.shouldTakeOver(level: 100, fans: takeoverFans)
+                && FanControlPolicy.floorCoolingLevel(fans: takeoverFans) == 15
+                && FanControlPolicy.appliedCoolingLevel(10, floorLevel: 15) == 15
+                && FanControlPolicy.appliedCoolingLevel(100, floorLevel: 15) == 100,
+               "takeover only raises the captured system floor and emergency cooling ignores it")
+        let defaultCurve = FanControlConfiguration.defaultCurve
         let duplicateCurves = [defaultCurve,
-                               FanControlCurve(sensor: .hottestSoC, points: cpuCurve.points)]
-        let descendingCurve = FanControlCurve(
-            sensor: .averageCPU,
-            points: [FanControlCurvePoint(temperature: 50, coolingLevel: 80),
-                     FanControlCurvePoint(temperature: 70, coolingLevel: 40)]
-        )
+                               FanControlCurve(sensor: .hottestCPU, points: defaultCurve.points)]
         suite.expect(!FanControlPolicy.validCurves(duplicateCurves)
-                && !FanControlPolicy.validCurves([descendingCurve])
                 && FanControlConfiguration.decodeCurves(
                     FanControlConfiguration.encodeCurves([defaultCurve]) ?? "") == [defaultCurve]
                 && FanControlConfiguration.decodeCurves("not json") == nil,
-               "stored curves reject duplicate sensors, unsafe slopes and malformed data")
-        let addedPoints = FanControlPolicy.addingCurvePoint(to: defaultCurve.points)
-        suite.expect(FanControlPolicy.nextCurvePoint(for: defaultCurve.points) == FanControlCurvePoint(temperature: 60, coolingLevel: 50)
-                && addedPoints == [
-                    FanControlCurvePoint(temperature: 50, coolingLevel: 0),
-                    FanControlCurvePoint(temperature: 60, coolingLevel: 50),
-                    FanControlCurvePoint(temperature: 70, coolingLevel: 100),
-                ]
-                && FanControlPolicy.validCurve(FanControlCurve(sensor: .hottestSoC, points: addedPoints ?? [])),
-               "adding a fan curve point calculates the intermediate point and produces a valid sorted curve")
-        var iterativePoints = defaultCurve.points
-        while let next = FanControlPolicy.addingCurvePoint(to: iterativePoints) {
-            iterativePoints = next
-        }
-        suite.expect(iterativePoints.count == FanControlPolicy.maximumCurvePointCount
-                && FanControlPolicy.validCurve(FanControlCurve(sensor: .hottestSoC, points: iterativePoints))
-                && FanControlPolicy.nextCurvePoint(for: iterativePoints) == nil
-                && FanControlPolicy.addingCurvePoint(to: iterativePoints) == nil,
-               "adding fan curve points fills up to the maximum point limit with strictly valid curves")
-        let secondCurve = FanControlCurve(sensor: .averageCPU,
-                                          points: defaultCurve.points)
-        var updatedCurves = [defaultCurve, secondCurve]
-        if let secondPoints = FanControlPolicy.addingCurvePoint(to: updatedCurves[1].points) {
-            updatedCurves[1].points = secondPoints
-        }
-        let storedUpdatedCurves = FanControlConfiguration.decodeCurves(
-            FanControlConfiguration.encodeCurves(updatedCurves) ?? ""
-        )
-        suite.expect(updatedCurves.count == 2
-                && updatedCurves.first == defaultCurve
-                && updatedCurves[1].points == addedPoints
-                && storedUpdatedCurves == updatedCurves,
-               "adding a point to the second fan curve preserves every valid stored curve")
+               "legacy stored curves still round-trip for settings migration")
+        let legacyCurveJSON = Data(#"{"mode":"curve","manualLevel":100,"curves":[{"sensor":"averageCPU","points":[{"temperature":55,"coolingLevel":0},{"temperature":80,"coolingLevel":100}]}]}"#.utf8)
+        let decodedLegacyCurve = try? JSONDecoder().decode(FanControlConfiguration.self,
+                                                           from: legacyCurveJSON)
+        suite.expect(decodedLegacyCurve?.mode == .curve
+                && decodedLegacyCurve?.sensor == .averageCPU
+                && decodedLegacyCurve?.threshold == 55
+                && decodedLegacyCurve?.accelerationFactor == 1,
+               "an older helper curve payload keeps its sensor and start temperature")
         let m3FanTemperatures = FanControlPolicy.aggregatedTemperatures(
             cpuReadings: [("Te05", 44), ("Tf4E", 53), ("Tf4F", 76)],
             gpuReadings: [48],
+            packageReadings: [46],
             platform: .appleM3Family
         )
+        suite.expectClose(m3FanTemperatures.first { $0.source == .packageCPU }?.celsius ?? -1,
+                    46,
+                    "fan curves expose the CPU package reading when the SMC key is present")
         suite.expectClose(m3FanTemperatures.first { $0.source == .hottestCPU }?.celsius ?? -1,
                     53,
                     "M3 fan curves include the hottest mapped Tf CPU core")
@@ -881,6 +871,8 @@ enum FeatureCatalogTests {
                          "current fan speed format stays valid for \(language.rawValue)")
             expectFormat(strings.targetRPMFormat, ["d"],
                          "target fan speed format stays valid for \(language.rawValue)")
+            expectFormat(strings.accelerationFormat, ["f"],
+                         "acceleration format stays valid for \(language.rawValue)")
         }
         suite.expect(FanControlFeatureStrings.ru.rpmFormat == "%d об/мин"
                 && FanControlFeatureStrings.de.rpmFormat == "%d U/min"
@@ -920,6 +912,18 @@ enum FeatureCatalogTests {
             suite.expect(!fanMigration.bool(forKey: DefaultsKey.panelShowFanControl)
                     && !fanMigration.bool(forKey: AppFeature.fanControl.availabilityKey),
                    "newer fan choices win over the legacy opt-in")
+
+            fanMigration.removePersistentDomain(forName: fanMigrationSuite)
+            let legacyCurves = FanControlConfiguration.encodeCurves([
+                FanControlCurve(sensor: .averageCPU,
+                                points: [FanControlCurvePoint(temperature: 55, coolingLevel: 0),
+                                         FanControlCurvePoint(temperature: 80, coolingLevel: 100)])
+            ])
+            fanMigration.set(legacyCurves, forKey: DefaultsKey.fanControlCurves)
+            Defaults.migrateFanControlCurveSettings(in: fanMigration)
+            suite.expect(fanMigration.string(forKey: DefaultsKey.fanControlSensor) == FanControlTemperatureSource.averageCPU.rawValue
+                    && fanMigration.integer(forKey: DefaultsKey.fanControlThreshold) == 55,
+                   "an old drawn curve keeps its sensor and start temperature")
             fanMigration.removePersistentDomain(forName: fanMigrationSuite)
         } else {
             suite.expect(false, "fan visibility migration suite can be created")

@@ -136,6 +136,7 @@ struct MenuPanelView: View {
 
     private var monitorNeeds: SystemMonitorPanelNeeds {
         if let selectedMetric {
+            if selectedMetric == .fan { return .none }
             return selectedMetric.monitorNeeds
         }
         switch activeSection {
@@ -224,8 +225,14 @@ struct MenuPanelView: View {
             if let selectedMetric {
                 metricNavigationHeader(selectedMetric)
                 OverlayScrollView(measuredHeight: $metricContentHeight) {
-                    MetricDetailView(kind: selectedMetric)
-                        .frame(width: 308)
+                    Group {
+                        if selectedMetric == .fan {
+                            FanControlSection(collapsible: false)
+                        } else {
+                            MetricDetailView(kind: selectedMetric)
+                        }
+                    }
+                    .frame(width: 308)
                 }
                 .frame(width: 308, height: metricScrollHeight)
             }
@@ -288,7 +295,7 @@ struct MenuPanelView: View {
         case .network: return 190
         case .disk: return 360
         case .power: return 170
-        case .fanControl: return 220
+        case .fanControl: return 420
         case .utilities: return 500
         case .controls: return 360
         case .toggles: return 420
@@ -302,7 +309,7 @@ struct MenuPanelView: View {
         case .network: return 330
         case .disk: return 360
         case .battery, .power: return 360
-        case .fan: return 240
+        case .fan: return 420
         }
     }
 

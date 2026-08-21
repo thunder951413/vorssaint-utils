@@ -451,6 +451,9 @@ enum MetricsFeatureTests {
                 && !TemperatureSensorSelector.isCPUTemperatureKey("Tf4E", platform: .appleM4Family)
                 && TemperatureSensorSelector.isCPUTemperatureKey("Tp01", platform: .appleM4Family),
                "M3 discovery includes its mapped Tf family without broadening later chips")
+        suite.expect(TemperatureSensorSelector.cpuCoreKeyNames(platform: .appleM3Family).contains("Te05")
+                && TemperatureSensorSelector.cpuCoreKeyNames(platform: .generic).isEmpty,
+               "fan telemetry looks up mapped CPU cores by name instead of scanning every SMC key")
         let m1CPU = TemperatureSensorSelector.displayedCPUTemperature(
             readings: [("Tp09", 43.0), ("Tp01", 49.0), ("Tp02", 70.0)],
             platform: .appleM1Family

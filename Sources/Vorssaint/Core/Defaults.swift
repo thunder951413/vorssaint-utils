@@ -367,6 +367,10 @@ enum DefaultsKey {
     static let fanControlMode = "fanControlMode"
     static let fanControlCoolingLevel = "fanControlCoolingLevel"
     static let fanControlCurves = "fanControlCurves"
+    static let fanControlSensor = "fanControlSensor"
+    static let fanControlThreshold = "fanControlThreshold"
+    static let fanControlAcceleration = "fanControlAcceleration"
+    static let fanControlCurveArmed = "fanControlCurveArmed"
     // Previous panel visibility key, read once by the migration below.
     static let monitorShowFanControlBeta = "monitorShowFanControlBeta"
     // Machine-only recovery state. A true value means the helper must confirm
@@ -1319,9 +1323,13 @@ enum Defaults {
         DefaultsKey.monitorShowPower: true,
         DefaultsKey.monitorShowMixer: true,
         DefaultsKey.panelShowFanControl: true,
-        DefaultsKey.fanControlMode: FanControlMode.system.rawValue,
+        DefaultsKey.fanControlMode: FanControlMode.curve.rawValue,
         DefaultsKey.fanControlCoolingLevel: FanControlPolicy.defaultCoolingLevel,
         DefaultsKey.fanControlCurves: FanControlConfiguration.defaultCurvesStorage,
+        DefaultsKey.fanControlSensor: FanControlPolicy.defaultSensor.rawValue,
+        DefaultsKey.fanControlThreshold: FanControlPolicy.defaultThreshold,
+        DefaultsKey.fanControlAcceleration: FanControlPolicy.defaultAccelerationFactor,
+        DefaultsKey.fanControlCurveArmed: false,
         DefaultsKey.fanControlRecoveryNeeded: false,
         DefaultsKey.fanControlHelperVersion: "",
         DefaultsKey.panelNavigationEnabled: true,
@@ -1584,6 +1592,7 @@ enum Defaults {
     static func register() {
         let defaults = UserDefaults.standard
         migrateFanControlVisibility(in: defaults)
+        migrateFanControlCurveSettings(in: defaults)
         migrateScrollInverterAxes(in: defaults)
         migrateWhatsAppDownloadsEnabled(in: defaults)
         migrateBatteryTemperatureVisibility(in: defaults)
@@ -1674,6 +1683,20 @@ enum Defaults {
             }
         }
         defaults.removeObject(forKey: DefaultsKey.monitorShowFanControlBeta)
+    }
+
+    static func migrateFanControlCurveSettings(in defaults: UserDefaults) {
+        let storedCurves = defaults.string(forKey: DefaultsKey.fanControlCurves)
+            .flatMap(FanControlConfiguration.decodeCurves)
+        if defaults.object(forKey: DefaultsKey.fanControlSensor) == nil,
+           let sensor = storedCurves?.first?.sensor {
+            defaults.set(sensor.rawValue, forKey: DefaultsKey.fanControlSensor)
+        }
+        if defaults.object(forKey: DefaultsKey.fanControlThreshold) == nil,
+           let temperature = storedCurves?.first?.points.first?.temperature {
+            defaults.set(FanControlPolicy.clampedThreshold(temperature),
+                         forKey: DefaultsKey.fanControlThreshold)
+        }
     }
 
     /// The "show the desktop app without windows" toggle became one choice of

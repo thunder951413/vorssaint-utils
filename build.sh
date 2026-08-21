@@ -111,6 +111,13 @@ if (( DEV || INSTALL )) && [[ -z "$(developer_id_identity)" ]] \
     fi
 fi
 
+apple_development_identity() {
+    security find-identity -v -p codesigning 2>/dev/null \
+        | grep 'Apple Development:' \
+        | head -1 \
+        | sed -E 's/.*"(.*)".*/\1/' || true
+}
+
 codesign_with_timestamp_retry() {
     local attempt
     for attempt in 1 2 3; do
@@ -153,8 +160,9 @@ finalize_installed_bundle_after_child() {
     local bundle="$1"
     local helper="$bundle/Contents/Library/LaunchServices/$FAN_HELPER_ID"
     local adapter="$bundle/Contents/Frameworks/$NOW_PLAYING_ADAPTER"
-    local devid
+    local devid appledev
     devid="$(developer_id_identity)"
+    appledev="$(apple_development_identity)"
 
     echo "▸ Finalizing installed signature…"
     sleep 3
@@ -171,6 +179,13 @@ finalize_installed_bundle_after_child() {
         [[ -f "$adapter" ]] && /usr/bin/codesign --force --strip-disallowed-xattrs \
             --identifier "$NOW_PLAYING_ADAPTER_ID" --sign "$LEGACY_IDENTITY" "$adapter"
         /usr/bin/codesign --force --strip-disallowed-xattrs --sign "$LEGACY_IDENTITY" "$bundle"
+    elif [[ -n "$appledev" ]]; then
+        [[ -f "$helper" ]] && codesign_with_timestamp_retry --force --strip-disallowed-xattrs \
+            --options runtime --timestamp --identifier "$FAN_HELPER_ID" --sign "$appledev" "$helper"
+        [[ -f "$adapter" ]] && codesign_with_timestamp_retry --force --strip-disallowed-xattrs \
+            --options runtime --timestamp --identifier "$NOW_PLAYING_ADAPTER_ID" --sign "$appledev" "$adapter"
+        codesign_with_timestamp_retry --force --strip-disallowed-xattrs --options runtime --timestamp \
+            --entitlements "$ENTITLEMENTS" --sign "$appledev" "$bundle"
     else
         [[ -f "$helper" ]] && /usr/bin/codesign --force --strip-disallowed-xattrs \
             --identifier "$FAN_HELPER_ID" --sign - "$helper"
@@ -642,6 +657,7 @@ xattr -c -r "$STAGE" 2>/dev/null || true
 #      designated requirement across their local builds.
 #   3. Ad-hoc — fresh clone with no identity at all.
 DEVID="$(developer_id_identity)"
+APPLEDEV="$(apple_development_identity)"
 codesign_app() {
     local target="$1"
     if [[ -n "$DEVID" ]]; then
@@ -649,6 +665,9 @@ codesign_app() {
             --entitlements "$ENTITLEMENTS" --sign "$DEVID" "$target"
     elif legacy_identity_installed; then
         codesign --force --strip-disallowed-xattrs --sign "$LEGACY_IDENTITY" "$target"
+    elif [[ -n "$APPLEDEV" ]]; then
+        codesign_with_timestamp_retry --force --strip-disallowed-xattrs --options runtime --timestamp \
+            --entitlements "$ENTITLEMENTS" --sign "$APPLEDEV" "$target"
     else
         codesign --force --strip-disallowed-xattrs --sign - "$target"
     fi
@@ -662,6 +681,9 @@ codesign_fan_helper() {
     elif legacy_identity_installed; then
         codesign --force --strip-disallowed-xattrs --identifier "$FAN_HELPER_ID" \
             --sign "$LEGACY_IDENTITY" "$target"
+    elif [[ -n "$APPLEDEV" ]]; then
+        codesign_with_timestamp_retry --force --strip-disallowed-xattrs --options runtime --timestamp \
+            --identifier "$FAN_HELPER_ID" --sign "$APPLEDEV" "$target"
     else
         codesign --force --strip-disallowed-xattrs --identifier "$FAN_HELPER_ID" --sign - "$target"
     fi
@@ -690,6 +712,8 @@ sign_bundle() {
         echo "  signing with Developer ID (hardened runtime): $DEVID"
     elif legacy_identity_installed; then
         echo "  signing with legacy self-signed identity: $LEGACY_IDENTITY"
+    elif [[ -n "$APPLEDEV" ]]; then
+        echo "  signing with Apple Development (hardened runtime): $APPLEDEV"
     else
         echo "  signing ad-hoc (no identity installed — run Tools/setup-signing.sh)"
     fi
@@ -797,6 +821,7 @@ fi
 if (( INSTALL )); then
     echo "▸ Installing into /Applications…"
     stop_process "$EXECUTABLE"
+    pkill -f "/Contents/Library/LaunchServices/$FAN_HELPER_ID" 2>/dev/null || true
     # Remove the pre-rename apps so two menu bar items never coexist. Same bundle
     # id, so macOS keeps the granted permissions for the new bundle.
     for legacy in "Vorss:Vorss" "Vorssaint Utils:VorssaintUtils"; do

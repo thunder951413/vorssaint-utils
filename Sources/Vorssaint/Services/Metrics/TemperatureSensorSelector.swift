@@ -109,21 +109,19 @@ enum TemperatureSensorSelector {
         }
     }
 
-    static func isCPUCoreKey(_ key: String, platform: CPUTemperaturePlatform) -> Bool {
+    static func cpuCoreKeyNames(platform: CPUTemperaturePlatform) -> Set<String> {
         switch platform {
-        case .appleM1Family:
-            return appleM1CPUCoreKeys.contains(key)
-        case .appleM2Family:
-            return appleM2CPUCoreKeys.contains(key)
-        case .appleM3Family:
-            return appleM3CPUCoreKeys.contains(key)
-        case .appleM4Family:
-            return appleM4CPUCoreKeys.contains(key)
-        case .appleM5Family:
-            return appleM5CPUCoreKeys.contains(key)
-        case .unmappedAppleSilicon, .generic:
-            return false
+        case .appleM1Family: return appleM1CPUCoreKeys
+        case .appleM2Family: return appleM2CPUCoreKeys
+        case .appleM3Family: return appleM3CPUCoreKeys
+        case .appleM4Family: return appleM4CPUCoreKeys
+        case .appleM5Family: return appleM5CPUCoreKeys
+        case .unmappedAppleSilicon, .generic: return []
         }
+    }
+
+    static func isCPUCoreKey(_ key: String, platform: CPUTemperaturePlatform) -> Bool {
+        cpuCoreKeyNames(platform: platform).contains(key)
     }
 
     static func isCPUTemperatureKey(_ key: String,

@@ -94,6 +94,7 @@ private final class FanControlController {
     private var temperatureFailures = 0
     private var lastStopReason: FanControlStopReason?
     private var coolingLevel: Int?
+    private var capturedFloorLevel = 0
     private var activeConfiguration: FanControlConfiguration?
     private var connectionCount = 0
     private var idleGeneration = 0
@@ -201,6 +202,9 @@ private final class FanControlController {
                 ? .success(currentSnapshot())
                 : .failure(.controlFailed, snapshot: currentSnapshot())
         }
+        if configuration.mode == .curve {
+            return applyCurve(session: id, configuration: configuration, duration: duration)
+        }
         if isCooling {
             guard owner == id else {
                 return .failure(.alreadyControlled, snapshot: currentSnapshot())
@@ -278,7 +282,8 @@ private final class FanControlController {
                                            duration: TimeInterval?) -> FanControlResponse {
         if hardware == nil { hardware = FanControlHardware() }
         guard let hardware,
-              let level = requestedLevel(for: configuration, hardware: hardware) else {
+              let level = requestedLevel(for: configuration, hardware: hardware,
+                                         previousLevel: coolingLevel) else {
             return .failure(.controlFailed, snapshot: currentSnapshot())
         }
         do {
@@ -299,6 +304,60 @@ private final class FanControlController {
         }
     }
 
+    private func applyCurve(session id: UUID,
+                            configuration: FanControlConfiguration,
+                            duration: TimeInterval?) -> FanControlResponse {
+        if hardware == nil { hardware = FanControlHardware() }
+        guard let hardware else { return .failure(.unsupportedHardware) }
+        let demand = FanControlPolicy.curveDemand(
+            sensor: configuration.sensor,
+            threshold: configuration.threshold,
+            accelerationFactor: configuration.accelerationFactor,
+            temperatures: hardware.readTemperatures(),
+            previousLevel: isCooling ? coolingLevel : nil
+        )
+        switch demand {
+        case .belowThreshold:
+            if isCooling {
+                return performRestore(reason: nil)
+                    ? .success(currentSnapshot())
+                    : .failure(.controlFailed, snapshot: currentSnapshot())
+            }
+            return .success(currentSnapshot())
+        case .unavailable:
+            return .failure(.controlFailed, snapshot: currentSnapshot())
+        case .cooling(let level):
+            if isCooling {
+                guard owner == id else {
+                    return .failure(.alreadyControlled, snapshot: currentSnapshot())
+                }
+                return updateActiveConfiguration(configuration, duration: duration)
+            }
+            let fans: [FanControlFanReading]
+            do {
+                fans = try hardware.readOnlySnapshot().fans
+            } catch FanControlHardwareError.alreadyControlled {
+                return .failure(.alreadyControlled, snapshot: currentSnapshot())
+            } catch FanControlHardwareError.noFans {
+                return .failure(.noFans)
+            } catch {
+                return .failure(.unsupportedHardware)
+            }
+            capturedFloorLevel = FanControlPolicy.floorCoolingLevel(fans: fans)
+            let applied = FanControlPolicy.appliedCoolingLevel(level, floorLevel: capturedFloorLevel)
+            let response = applyConfiguration(session: id,
+                                              configuration: .manual(level: applied),
+                                              duration: duration)
+            if response.succeeded, isCooling {
+                activeConfiguration = configuration
+                coolingLevel = applied
+                return .success(currentSnapshot())
+            }
+            capturedFloorLevel = 0
+            return response
+        }
+    }
+
     private func requestedLevel(for configuration: FanControlConfiguration,
                                 hardware: FanControlHardware,
                                 previousLevel: Int? = nil) -> Int? {
@@ -308,11 +367,18 @@ private final class FanControlController {
         case .manual:
             return configuration.manualLevel
         case .curve:
-            return FanControlPolicy.curveCoolingLevel(
-                curves: configuration.curves,
+            switch FanControlPolicy.curveDemand(
+                sensor: configuration.sensor,
+                threshold: configuration.threshold,
+                accelerationFactor: configuration.accelerationFactor,
                 temperatures: hardware.readTemperatures(),
                 previousLevel: previousLevel
-            )
+            ) {
+            case .cooling(let level):
+                return FanControlPolicy.appliedCoolingLevel(level, floorLevel: capturedFloorLevel)
+            case .belowThreshold, .unavailable:
+                return nil
+            }
         }
     }
 
@@ -359,6 +425,7 @@ private final class FanControlController {
         isRecovering = false
         owner = nil
         coolingLevel = nil
+        capturedFloorLevel = 0
         activeConfiguration = nil
         endsAt = nil
         endsAtUptime = nil
@@ -414,21 +481,32 @@ private final class FanControlController {
         if activeConfiguration?.mode == .curve,
            let configuration = activeConfiguration,
            let hardware {
-            if let requested = requestedLevel(for: configuration, hardware: hardware,
-                                              previousLevel: coolingLevel) {
+            switch FanControlPolicy.curveDemand(
+                sensor: configuration.sensor,
+                threshold: configuration.threshold,
+                accelerationFactor: configuration.accelerationFactor,
+                temperatures: hardware.readTemperatures(),
+                previousLevel: coolingLevel
+            ) {
+            case .cooling(let requested):
                 temperatureFailures = 0
-                if requested == coolingLevel {
+                let applied = FanControlPolicy.appliedCoolingLevel(
+                    requested, floorLevel: capturedFloorLevel)
+                if applied == coolingLevel {
                     controlIntact = hardware.coolingIsIntact()
                 } else {
                     do {
-                        _ = try hardware.updateCooling(level: requested)
-                        coolingLevel = requested
+                        _ = try hardware.updateCooling(level: applied)
+                        coolingLevel = applied
                         controlIntact = true
                     } catch {
                         controlIntact = false
                     }
                 }
-            } else {
+            case .belowThreshold:
+                _ = performRestore(reason: nil)
+                return
+            case .unavailable:
                 temperatureFailures += 1
                 controlIntact = hardware.coolingIsIntact()
             }
@@ -496,7 +574,7 @@ private final class FanControlController {
         } catch FanControlHardwareError.unsupported {
             return .failure(.unsupportedHardware)
         } catch {
-            return .failure(.controlFailed)
+            return .failure(.controlFailed, snapshot: currentSnapshot())
         }
     }
 
@@ -578,7 +656,7 @@ private func runSelfTest() -> Bool {
     guard FanControlIdentifiers.helperID.hasSuffix(".fan-control"),
           FanControlPolicy.coolingDuration == 900,
           FanControlPolicy.validCoolingLevel(FanControlPolicy.defaultCoolingLevel),
-          FanControlPolicy.validConfiguration(.curve([FanControlConfiguration.defaultCurve])),
+          FanControlPolicy.validConfiguration(.curve()),
           let encoded = SMCValueCodec.encode(4_800, type: "flt ", size: 4),
           SMCValueCodec.decode(encoded, type: "flt ") == 4_800 else { return false }
     print("fan-control-helper: ok")

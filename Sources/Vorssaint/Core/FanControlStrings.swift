@@ -46,6 +46,12 @@ struct FanControlFeatureStrings {
     let hottestCPU: String
     let hottestGPU: String
     let helperUnavailable: String
+    let packageCPU: String
+    let threshold: String
+    let acceleration: String
+    let accelerationCaption: String
+    let accelerationFormat: String
+    let waitingForThreshold: String
 }
 
 extension FeatureStrings {
@@ -71,9 +77,9 @@ extension FeatureStrings {
 extension FanControlFeatureStrings {
     static let enUS = FanControlFeatureStrings(
         title: "Fan Control",
-        hubDescription: "Control fans manually or with temperature curves while seeing live and target RPM",
+        hubDescription: "Control fans from a selected temperature sensor with an acceleration factor, or set a manual speed",
         showInPanel: "Show Fan Control in the panel",
-        settingsCaption: "Adds manual fan speeds and temperature curves to the menu bar panel.",
+        settingsCaption: "Adds manual fan speeds and a temperature-based curve with a selectable sensor and acceleration factor.",
         fanNameFormat: "Fan %d",
         rpmFormat: "%d RPM",
         allowControl: "Allow fan control",
@@ -83,7 +89,7 @@ extension FanControlFeatureStrings {
         unsupported: "Fan control is not available on this Mac.",
         alreadyControlled: "Another process is controlling the fans. Return it to system control first.",
         failed: "The fans returned to system control because the requested control could not be verified.",
-        safetyCaption: "Control stays active until you return to System. It returns automatically if the app disconnects, the Mac sleeps, sensor readings fail or thermal pressure rises.",
+        safetyCaption: "The curve supplements macOS above the start temperature and never lowers the captured system speed. It returns to System below that temperature, or if the app disconnects, the Mac sleeps, sensors fail or thermal pressure rises.",
         safetyStopped: "Returned to system control because fan control was interrupted.",
         menuBarTitle: "Fan speed",
         systemControl: "System",
@@ -97,7 +103,7 @@ extension FanControlFeatureStrings {
         applyCurve: "Apply fan curve",
         returnToSystem: "Use system control",
         temperatureUnavailable: "The selected temperature sensor stopped responding. Fan control returned to System.",
-        curveUnavailable: "A selected temperature sensor is not available on this Mac.",
+        curveUnavailable: "The selected temperature sensor is not available on this Mac.",
         sensor: "Temperature sensor",
         temperature: "Temperature",
         fanSpeed: "Fan speed",
@@ -111,7 +117,13 @@ extension FanControlFeatureStrings {
         averageCPU: "Average CPU",
         hottestCPU: "Hottest CPU",
         hottestGPU: "Hottest GPU",
-        helperUnavailable: "The protected fan controller is unavailable. Allow Vorssaint in Login Items, then try again."
+        helperUnavailable: "The protected fan controller is unavailable. Allow Vorssaint in Login Items, then try again.",
+        packageCPU: "CPU package",
+        threshold: "Start temperature",
+        acceleration: "Acceleration",
+        accelerationCaption: "0.5× gentler, 1.0× standard, 2.0× stronger. The curve keeps the same start and maximum temperatures.",
+        accelerationFormat: "%.1f×",
+        waitingForThreshold: "Below the start temperature. Fans stay under system control until the curve needs to run."
     )
 
     static let ptBR = FanControlFeatureStrings(
@@ -156,7 +168,13 @@ extension FanControlFeatureStrings {
         averageCPU: "Média da CPU",
         hottestCPU: "CPU mais quente",
         hottestGPU: "GPU mais quente",
-        helperUnavailable: "O controlador protegido das ventoinhas não está disponível. Permita o Vorssaint nos Itens de Início e tente novamente."
+        helperUnavailable: "O controlador protegido das ventoinhas não está disponível. Permita o Vorssaint nos Itens de Início e tente novamente.",
+        packageCPU: "Pacote da CPU",
+        threshold: "Temperatura inicial",
+        acceleration: "Aceleração",
+        accelerationCaption: "0.5× mais suave, 1.0× padrão, 2.0× mais forte. A curva mantém o início e a temperatura máxima.",
+        accelerationFormat: "%.1f×",
+        waitingForThreshold: "Abaixo da temperatura inicial. As ventoinhas ficam no sistema até a curva precisar atuar."
     )
 
     static let tr = FanControlFeatureStrings(
@@ -201,7 +219,13 @@ extension FanControlFeatureStrings {
         averageCPU: "Ortalama CPU",
         hottestCPU: "En sıcak CPU",
         hottestGPU: "En sıcak GPU",
-        helperUnavailable: "Korumalı fan denetleyicisi kullanılamıyor. Giriş Öğeleri’nde Vorssaint’e izin verip yeniden deneyin."
+        helperUnavailable: "Korumalı fan denetleyicisi kullanılamıyor. Giriş Öğeleri’nde Vorssaint’e izin verip yeniden deneyin.",
+        packageCPU: "CPU paketi",
+        threshold: "Başlangıç sıcaklığı",
+        acceleration: "Hızlanma",
+        accelerationCaption: "0.5× daha yumuşak, 1.0× standart, 2.0× daha güçlü. Eğri aynı başlangıç ve en yüksek sıcaklığı korur.",
+        accelerationFormat: "%.1f×",
+        waitingForThreshold: "Başlangıç sıcaklığının altında. Eğri gerekene kadar fanlar sistem kontrolünde kalır."
     )
 
     static let ru = FanControlFeatureStrings(
@@ -246,7 +270,13 @@ extension FanControlFeatureStrings {
         averageCPU: "Средняя CPU",
         hottestCPU: "Самая горячая CPU",
         hottestGPU: "Самая горячая GPU",
-        helperUnavailable: "Защищённый контроллер вентиляторов недоступен. Разрешите Vorssaint в Объектах входа и повторите попытку."
+        helperUnavailable: "Защищённый контроллер вентиляторов недоступен. Разрешите Vorssaint в Объектах входа и повторите попытку.",
+        packageCPU: "Корпус CPU",
+        threshold: "Температура старта",
+        acceleration: "Ускорение",
+        accelerationCaption: "0.5× мягче, 1.0× стандарт, 2.0× сильнее. Кривая сохраняет ту же начальную и максимальную температуру.",
+        accelerationFormat: "%.1f×",
+        waitingForThreshold: "Ниже стартовой температуры. Вентиляторы остаются под управлением системы, пока кривая не понадобится."
     )
 
     static let es = FanControlFeatureStrings(
@@ -291,7 +321,13 @@ extension FanControlFeatureStrings {
         averageCPU: "Promedio de CPU",
         hottestCPU: "CPU más caliente",
         hottestGPU: "GPU más caliente",
-        helperUnavailable: "El controlador protegido de los ventiladores no está disponible. Permite Vorssaint en Ítems de inicio e inténtalo de nuevo."
+        helperUnavailable: "El controlador protegido de los ventiladores no está disponible. Permite Vorssaint en Ítems de inicio e inténtalo de nuevo.",
+        packageCPU: "Paquete de CPU",
+        threshold: "Temperatura de inicio",
+        acceleration: "Aceleración",
+        accelerationCaption: "0.5× más suave, 1.0× estándar, 2.0× más fuerte. La curva conserva el inicio y la temperatura máxima.",
+        accelerationFormat: "%.1f×",
+        waitingForThreshold: "Por debajo de la temperatura de inicio. Los ventiladores siguen en el sistema hasta que la curva deba actuar."
     )
 
     static let de = FanControlFeatureStrings(
@@ -336,7 +372,13 @@ extension FanControlFeatureStrings {
         averageCPU: "CPU-Durchschnitt",
         hottestCPU: "Heißeste CPU",
         hottestGPU: "Heißeste GPU",
-        helperUnavailable: "Die geschützte Lüftersteuerung ist nicht verfügbar. Erlaube Vorssaint unter Anmeldeobjekte und versuche es erneut."
+        helperUnavailable: "Die geschützte Lüftersteuerung ist nicht verfügbar. Erlaube Vorssaint unter Anmeldeobjekte und versuche es erneut.",
+        packageCPU: "CPU-Package",
+        threshold: "Starttemperatur",
+        acceleration: "Beschleunigung",
+        accelerationCaption: "0.5× sanfter, 1.0× Standard, 2.0× stärker. Die Kurve behält Start- und Maximaltemperatur.",
+        accelerationFormat: "%.1f×",
+        waitingForThreshold: "Unter der Starttemperatur. Die Lüfter bleiben unter Systemsteuerung, bis die Kurve eingreifen muss."
     )
 
     static let fr = FanControlFeatureStrings(
@@ -381,7 +423,13 @@ extension FanControlFeatureStrings {
         averageCPU: "Moyenne du CPU",
         hottestCPU: "CPU le plus chaud",
         hottestGPU: "GPU le plus chaud",
-        helperUnavailable: "Le contrôleur protégé des ventilateurs est indisponible. Autorisez Vorssaint dans Ouverture, puis réessayez."
+        helperUnavailable: "Le contrôleur protégé des ventilateurs est indisponible. Autorisez Vorssaint dans Ouverture, puis réessayez.",
+        packageCPU: "Boîtier CPU",
+        threshold: "Température de départ",
+        acceleration: "Accélération",
+        accelerationCaption: "0.5× plus doux, 1.0× standard, 2.0× plus fort. La courbe garde les mêmes températures de départ et de maximum.",
+        accelerationFormat: "%.1f×",
+        waitingForThreshold: "Sous la température de départ. Les ventilateurs restent sous le système jusqu’à ce que la courbe doive intervenir."
     )
 
     static let it = FanControlFeatureStrings(
@@ -426,7 +474,13 @@ extension FanControlFeatureStrings {
         averageCPU: "Media CPU",
         hottestCPU: "CPU più calda",
         hottestGPU: "GPU più calda",
-        helperUnavailable: "Il controller protetto delle ventole non è disponibile. Consenti Vorssaint negli elementi di login e riprova."
+        helperUnavailable: "Il controller protetto delle ventole non è disponibile. Consenti Vorssaint negli elementi di login e riprova.",
+        packageCPU: "Package CPU",
+        threshold: "Temperatura di avvio",
+        acceleration: "Accelerazione",
+        accelerationCaption: "0.5× più dolce, 1.0× standard, 2.0× più forte. La curva mantiene le stesse temperature di inizio e di massimo.",
+        accelerationFormat: "%.1f×",
+        waitingForThreshold: "Sotto la temperatura di avvio. Le ventole restano sotto il sistema finché la curva non deve intervenire."
     )
 
     static let ja = FanControlFeatureStrings(
@@ -471,7 +525,13 @@ extension FanControlFeatureStrings {
         averageCPU: "CPU平均",
         hottestCPU: "最高CPU",
         hottestGPU: "最高GPU",
-        helperUnavailable: "保護されたファンコントローラを利用できません。ログイン項目でVorssaintを許可してから、もう一度お試しください。"
+        helperUnavailable: "保護されたファンコントローラを利用できません。ログイン項目でVorssaintを許可してから、もう一度お試しください。",
+        packageCPU: "CPUパッケージ",
+        threshold: "開始温度",
+        acceleration: "加速倍率",
+        accelerationCaption: "0.5×穏やか、1.0×標準、2.0×強め。曲線の開始温度と最高温度は変わりません。",
+        accelerationFormat: "%.1f×",
+        waitingForThreshold: "開始温度を下回っています。曲線が必要になるまでファンはシステム制御のままです。"
     )
 
     static let ko = FanControlFeatureStrings(
@@ -516,14 +576,20 @@ extension FanControlFeatureStrings {
         averageCPU: "평균 CPU",
         hottestCPU: "가장 뜨거운 CPU",
         hottestGPU: "가장 뜨거운 GPU",
-        helperUnavailable: "보호된 팬 컨트롤러를 사용할 수 없습니다. 로그인 항목에서 Vorssaint를 허용한 다음 다시 시도하세요."
+        helperUnavailable: "보호된 팬 컨트롤러를 사용할 수 없습니다. 로그인 항목에서 Vorssaint를 허용한 다음 다시 시도하세요.",
+        packageCPU: "CPU 패키지",
+        threshold: "시작 온도",
+        acceleration: "가속 배율",
+        accelerationCaption: "0.5× 더 부드럽게, 1.0× 표준, 2.0× 더 강하게. 곡선의 시작과 최고 온도는 그대로입니다.",
+        accelerationFormat: "%.1f×",
+        waitingForThreshold: "시작 온도보다 낮습니다. 곡선이 필요할 때까지 팬은 시스템 제어를 유지합니다."
     )
 
     static let zhHans = FanControlFeatureStrings(
         title: "风扇控制",
-        hubDescription: "查看当前和目标转速，并手动或按温度曲线控制风扇",
+        hubDescription: "根据所选温度传感器和加速倍率控制风扇，或手动设定转速",
         showInPanel: "在面板中显示风扇控制",
-        settingsCaption: "在菜单栏面板中添加手动转速和温度曲线。",
+        settingsCaption: "在菜单栏面板中添加手动转速，以及可选传感器和加速倍率的温度曲线。",
         fanNameFormat: "风扇%d",
         rpmFormat: "%d RPM",
         allowControl: "允许风扇控制",
@@ -533,7 +599,7 @@ extension FanControlFeatureStrings {
         unsupported: "这台Mac不支持风扇控制。",
         alreadyControlled: "另一个进程正在控制风扇。请先在那里恢复系统控制。",
         failed: "无法验证请求的控制，风扇已恢复系统控制。",
-        safetyCaption: "控制会保持到你恢复系统模式。App 断开、Mac睡眠、传感器失效或热压力升高时会自动交还系统。",
+        safetyCaption: "超过开始温度后曲线会补充系统控制，且不会低于接管时的系统转速。低于该温度、App 断开、Mac睡眠、传感器失效或热压力升高时会交还系统。",
         safetyStopped: "风扇控制中断，已恢复系统控制。",
         menuBarTitle: "风扇转速",
         systemControl: "系统",
@@ -561,7 +627,13 @@ extension FanControlFeatureStrings {
         averageCPU: "CPU平均温度",
         hottestCPU: "CPU最高温度",
         hottestGPU: "GPU最高温度",
-        helperUnavailable: "受保护的风扇控制器不可用。请在登录项中允许 Vorssaint，然后重试。"
+        helperUnavailable: "受保护的风扇控制器不可用。请在登录项中允许 Vorssaint，然后重试。",
+        packageCPU: "CPU封装",
+        threshold: "开始加速温度",
+        acceleration: "加速倍率",
+        accelerationCaption: "0.5×更柔和，1.0×标准，2.0×更强。曲线的起点和最高温度不变。",
+        accelerationFormat: "%.1f×",
+        waitingForThreshold: "低于开始温度。风扇仍由系统控制，直到曲线需要介入。"
     )
 
     static let zhTW = FanControlFeatureStrings(
@@ -606,7 +678,13 @@ extension FanControlFeatureStrings {
         averageCPU: "CPU平均溫度",
         hottestCPU: "CPU最高溫度",
         hottestGPU: "GPU最高溫度",
-        helperUnavailable: "受保護的風扇控制器無法使用。請在登入項目中允許 Vorssaint，然後再試一次。"
+        helperUnavailable: "受保護的風扇控制器無法使用。請在登入項目中允許 Vorssaint，然後再試一次。",
+        packageCPU: "CPU封裝",
+        threshold: "開始加速溫度",
+        acceleration: "加速倍率",
+        accelerationCaption: "0.5×較柔和，1.0×標準，2.0×較強。曲線的起點與最高溫度不變。",
+        accelerationFormat: "%.1f×",
+        waitingForThreshold: "低於開始溫度。風扇仍由系統控制，直到曲線需要介入。"
     )
 
     static let zhHK = FanControlFeatureStrings(
@@ -651,6 +729,12 @@ extension FanControlFeatureStrings {
         averageCPU: "CPU平均溫度",
         hottestCPU: "CPU最高溫度",
         hottestGPU: "GPU最高溫度",
-        helperUnavailable: "受保護的風扇控制器無法使用。請在登入項目允許 Vorssaint，然後再試一次。"
+        helperUnavailable: "受保護的風扇控制器無法使用。請在登入項目允許 Vorssaint，然後再試一次。",
+        packageCPU: "CPU封裝",
+        threshold: "開始加速溫度",
+        acceleration: "加速倍率",
+        accelerationCaption: "0.5×較柔和，1.0×標準，2.0×較強。曲線的起點與最高溫度不變。",
+        accelerationFormat: "%.1f×",
+        waitingForThreshold: "低於開始溫度。風扇仍由系統控制，直到曲線需要介入。"
     )
 }

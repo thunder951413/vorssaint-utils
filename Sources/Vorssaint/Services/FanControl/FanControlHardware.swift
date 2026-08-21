@@ -34,6 +34,7 @@ final class FanControlHardware {
     private struct TemperatureKeys {
         let cpu: [SMCClient.Key]
         let gpu: [SMCClient.Key]
+        let package: [SMCClient.Key]
     }
 
     private let client: SMCClient
@@ -52,7 +53,7 @@ final class FanControlHardware {
 
     func readOnlySnapshot() throws -> FanControlSnapshot {
         let fans = try discoverControlledFans()
-        let snapshot = FanControlSnapshot(fans: try readings(for: fans), isCooling: false,
+        let snapshot = FanControlSnapshot(fans: try displayReadings(for: fans), isCooling: false,
                                           endsAt: nil, stopReason: nil,
                                           coolingLevel: nil,
                                           configuration: nil,
@@ -240,6 +241,7 @@ final class FanControlHardware {
         return FanControlPolicy.aggregatedTemperatures(
             cpuReadings: cpuReadings,
             gpuReadings: temperatureReadings(keys.gpu).map(\.value),
+            packageReadings: temperatureReadings(keys.package).map(\.value),
             platform: temperaturePlatform
         )
     }
@@ -312,18 +314,26 @@ final class FanControlHardware {
         return key
     }
 
+    private static let packageKeyNames = ["TPMP", "TCHP", "TCMb"]
+    private static let gpuKeyNames = [
+        "Tg0P", "Tg1P", "Tg0D", "Tg1D", "Tg0F", "Tg1F", "Tg05", "Tg0r", "Tg1r",
+    ]
+
     private func discoverTemperatureKeys() -> TemperatureKeys {
         if let temperatureKeys { return temperatureKeys }
-        let keys = client.keys { name in
-            TemperatureSensorSelector.isCPUTemperatureKey(name, platform: temperaturePlatform)
-                || name.hasPrefix("Tg")
+        let coreNames = TemperatureSensorSelector.cpuCoreKeyNames(platform: temperaturePlatform)
+        let cpu: [SMCClient.Key]
+        if coreNames.isEmpty {
+            cpu = client.keys {
+                TemperatureSensorSelector.isCPUTemperatureKey($0, platform: temperaturePlatform)
+            }
+        } else {
+            cpu = coreNames.compactMap { client.key(named: $0) }
         }
         let result = TemperatureKeys(
-            cpu: keys.filter {
-                TemperatureSensorSelector.isCPUTemperatureKey($0.name,
-                                                              platform: temperaturePlatform)
-            },
-            gpu: keys.filter { $0.name.hasPrefix("Tg") }
+            cpu: cpu,
+            gpu: Self.gpuKeyNames.compactMap { client.key(named: $0) },
+            package: Self.packageKeyNames.compactMap { client.key(named: $0) }
         )
         temperatureKeys = result
         return result
@@ -339,6 +349,25 @@ final class FanControlHardware {
     }
 
     // MARK: - Reads and writes
+
+    private func displayReadings(for fans: [Fan]) throws -> [FanControlFanReading] {
+        try fans.map { fan in
+            guard let actual = client.readValue(fan.actual),
+                  FanControlPolicy.validReading(actual) else {
+                throw FanControlHardwareError.operationFailed
+            }
+            let target = client.readValue(fan.target).flatMap {
+                FanControlPolicy.validReading($0) ? $0 : nil
+            } ?? actual
+            return FanControlFanReading(index: fan.index,
+                                        actualRPM: max(0, actual),
+                                        minimumRPM: fan.minimumRPM,
+                                        maximumRPM: fan.maximumRPM,
+                                        targetRPM: max(0, target),
+                                        isManuallyControlled: (try? modeValue(fan.mode))
+                                            .map { !FanControlPolicy.isAutomaticMode($0) } ?? false)
+        }
+    }
 
     private func readings(for fans: [Fan]) throws -> [FanControlFanReading] {
         try fans.map { fan in

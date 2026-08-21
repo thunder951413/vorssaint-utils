@@ -21,10 +21,11 @@ enum FanControlMode: String, Codable, Sendable {
 }
 
 enum FanControlTemperatureSource: String, Codable, CaseIterable, Identifiable, Sendable {
-    case averageSoC
-    case hottestSoC
+    case packageCPU
     case averageCPU
     case hottestCPU
+    case averageSoC
+    case hottestSoC
     case hottestGPU
 
     var id: String { rawValue }
@@ -49,24 +50,80 @@ struct FanControlConfiguration: Codable, Equatable, Sendable {
     var mode: FanControlMode
     var manualLevel: Int
     var curves: [FanControlCurve]
+    var sensor: FanControlTemperatureSource
+    var threshold: Int
+    var accelerationFactor: Double
 
     static let defaultCurve = FanControlCurve(
-        sensor: .hottestSoC,
+        sensor: .hottestCPU,
         points: [
-            FanControlCurvePoint(temperature: 50, coolingLevel: 0),
-            FanControlCurvePoint(temperature: 70, coolingLevel: 100),
+            FanControlCurvePoint(temperature: FanControlPolicy.defaultThreshold,
+                                 coolingLevel: 0),
+            FanControlCurvePoint(temperature: FanControlPolicy.emergencyTemperature,
+                                 coolingLevel: 100),
         ]
     )
 
     static func manual(level: Int) -> FanControlConfiguration {
         FanControlConfiguration(mode: .manual, manualLevel: level,
-                                curves: [])
+                                curves: [],
+                                sensor: FanControlPolicy.defaultSensor,
+                                threshold: FanControlPolicy.defaultThreshold,
+                                accelerationFactor: FanControlPolicy.defaultAccelerationFactor)
     }
 
-    static func curve(_ curves: [FanControlCurve]) -> FanControlConfiguration {
+    static func curve(sensor: FanControlTemperatureSource = FanControlPolicy.defaultSensor,
+                      threshold: Int = FanControlPolicy.defaultThreshold,
+                      accelerationFactor: Double = FanControlPolicy.defaultAccelerationFactor) -> FanControlConfiguration {
         FanControlConfiguration(mode: .curve,
                                 manualLevel: FanControlPolicy.defaultCoolingLevel,
-                                curves: curves)
+                                curves: [],
+                                sensor: sensor,
+                                threshold: threshold,
+                                accelerationFactor: accelerationFactor)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case mode, manualLevel, curves, sensor, threshold, accelerationFactor
+    }
+
+    init(mode: FanControlMode, manualLevel: Int, curves: [FanControlCurve],
+         sensor: FanControlTemperatureSource, threshold: Int, accelerationFactor: Double) {
+        self.mode = mode
+        self.manualLevel = manualLevel
+        self.curves = curves
+        self.sensor = sensor
+        self.threshold = threshold
+        self.accelerationFactor = accelerationFactor
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        mode = try container.decode(FanControlMode.self, forKey: .mode)
+        manualLevel = try container.decode(Int.self, forKey: .manualLevel)
+        curves = try container.decodeIfPresent([FanControlCurve].self, forKey: .curves) ?? []
+        sensor = try container.decodeIfPresent(FanControlTemperatureSource.self, forKey: .sensor)
+            ?? curves.first?.sensor
+            ?? FanControlPolicy.defaultSensor
+        if let threshold = try container.decodeIfPresent(Int.self, forKey: .threshold) {
+            self.threshold = threshold
+        } else if let stored = curves.first?.points.first?.temperature {
+            self.threshold = FanControlPolicy.clampedThreshold(stored)
+        } else {
+            self.threshold = FanControlPolicy.defaultThreshold
+        }
+        accelerationFactor = try container.decodeIfPresent(Double.self, forKey: .accelerationFactor)
+            ?? FanControlPolicy.defaultAccelerationFactor
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(mode, forKey: .mode)
+        try container.encode(manualLevel, forKey: .manualLevel)
+        try container.encode(curves, forKey: .curves)
+        try container.encode(sensor, forKey: .sensor)
+        try container.encode(threshold, forKey: .threshold)
+        try container.encode(accelerationFactor, forKey: .accelerationFactor)
     }
 
     static func encodeCurves(_ curves: [FanControlCurve]) -> String? {
@@ -138,6 +195,12 @@ struct FanControlResponse: Codable, Equatable, Sendable {
     }
 }
 
+enum FanControlCurveDemand: Equatable, Sendable {
+    case cooling(Int)
+    case belowThreshold
+    case unavailable
+}
+
 enum FanControlPolicy {
     /// Retained only for the legacy XPC entry point used by older app builds.
     static let coolingDuration: TimeInterval = 15 * 60
@@ -155,7 +218,17 @@ enum FanControlPolicy {
     static let minimumCurvePointCount = 2
     static let maximumCurvePointCount = 8
     static let maximumCurveCount = FanControlTemperatureSource.allCases.count
-    static let curveHysteresis = 2.0
+    static let curveHysteresis = 3.0
+    static let defaultSensor = FanControlTemperatureSource.packageCPU
+    static let minimumThreshold = 40
+    static let maximumThreshold = 80
+    static let defaultThreshold = 68
+    static let emergencyTemperature = 90
+    static let minimumAccelerationFactor = 0.5
+    static let maximumAccelerationFactor = 2.0
+    static let accelerationFactorStep = 0.1
+    static let defaultAccelerationFactor = 1.0
+    static let takeoverMarginRPM = 100.0
 
     static func isAutomaticMode(_ mode: UInt8) -> Bool {
         mode == 0 || mode == 3
@@ -208,8 +281,39 @@ enum FanControlPolicy {
         case .manual:
             return validCoolingLevel(configuration.manualLevel)
         case .curve:
-            return validCurves(configuration.curves)
+            return validThreshold(configuration.threshold)
+                && validAccelerationFactor(configuration.accelerationFactor)
         }
+    }
+
+    static func validThreshold(_ threshold: Int) -> Bool {
+        (minimumThreshold...maximumThreshold).contains(threshold)
+    }
+
+    static func clampedThreshold(_ threshold: Int) -> Int {
+        min(maximumThreshold, max(minimumThreshold, threshold))
+    }
+
+    static func validAccelerationFactor(_ factor: Double) -> Bool {
+        factor.isFinite
+            && factor >= minimumAccelerationFactor
+            && factor <= maximumAccelerationFactor
+    }
+
+    static func clampAccelerationFactor(_ factor: Double) -> Double {
+        min(maximumAccelerationFactor, max(minimumAccelerationFactor, factor))
+    }
+
+    static func adjustedFraction(_ fraction: Double, factor: Double) -> Double {
+        let fraction = min(max(fraction, 0), 1)
+        guard fraction > 0, fraction < 1 else { return fraction }
+        return pow(fraction, 1 / clampAccelerationFactor(factor))
+    }
+
+    static func steppedCoolingLevel(fromFraction fraction: Double) -> Int {
+        let raw = min(1, max(0, fraction)) * Double(maximumCoolingLevel)
+        let stepped = Int((raw / Double(coolingLevelStep)).rounded()) * coolingLevelStep
+        return min(maximumCoolingLevel, max(minimumCoolingLevel, stepped))
     }
 
     static func validCurves(_ curves: [FanControlCurve]) -> Bool {
@@ -234,77 +338,57 @@ enum FanControlPolicy {
         return true
     }
 
-    static func nextCurvePoint(for points: [FanControlCurvePoint]) -> FanControlCurvePoint? {
-        guard points.count < maximumCurvePointCount,
-              let first = points.first,
-              let last = points.last else { return nil }
-        var best: (index: Int, gap: Int)?
-        for index in 1..<points.count {
-            let gap = points[index].temperature - points[index - 1].temperature
-            if gap > 1, gap > (best?.gap ?? 0) { best = (index, gap) }
+    static func curveDemand(sensor: FanControlTemperatureSource,
+                            threshold: Int,
+                            accelerationFactor: Double,
+                            temperatures: [FanControlTemperatureReading],
+                            previousLevel: Int? = nil) -> FanControlCurveDemand {
+        guard validThreshold(threshold), validAccelerationFactor(accelerationFactor) else {
+            return .unavailable
         }
-        if let best {
-            let lower = points[best.index - 1]
-            let upper = points[best.index]
-            let temperature = lower.temperature + best.gap / 2
-            let rawLevel = Double(lower.coolingLevel + upper.coolingLevel) / 2
-            let level = Int((rawLevel / Double(coolingLevelStep)).rounded())
-                * coolingLevelStep
-            return FanControlCurvePoint(temperature: temperature, coolingLevel: level)
+        guard let temperature = temperatures.first(where: { $0.source == sensor })?.celsius,
+              validTemperature(temperature) else {
+            return .unavailable
         }
-        if last.temperature < maximumCurveTemperature {
-            return FanControlCurvePoint(
-                temperature: min(maximumCurveTemperature, last.temperature + 10),
-                coolingLevel: last.coolingLevel
-            )
+        if temperature >= Double(emergencyTemperature) {
+            return .cooling(maximumCoolingLevel)
         }
-        if first.temperature > minimumCurveTemperature {
-            return FanControlCurvePoint(
-                temperature: max(minimumCurveTemperature, first.temperature - 10),
-                coolingLevel: first.coolingLevel
-            )
-        }
-        return nil
+        let start = Double(threshold)
+        let isActive = previousLevel != nil
+            ? temperature > start - curveHysteresis
+            : temperature > start
+        guard isActive else { return .belowThreshold }
+        let span = max(1, Double(emergencyTemperature) - start)
+        let fraction = min(1, max(0, (temperature - start) / span))
+        return .cooling(steppedCoolingLevel(
+            fromFraction: adjustedFraction(fraction, factor: accelerationFactor)))
     }
 
-    static func addingCurvePoint(to points: [FanControlCurvePoint]) -> [FanControlCurvePoint]? {
-        guard let point = nextCurvePoint(for: points) else { return nil }
-        var updated = points
-        updated.append(point)
-        updated.sort { $0.temperature < $1.temperature }
-        guard validCurve(FanControlCurve(sensor: .hottestSoC, points: updated)) else { return nil }
-        return updated
+    static func shouldTakeOver(level: Int, fans: [FanControlFanReading]) -> Bool {
+        guard validCoolingLevel(level), !fans.isEmpty else { return false }
+        if level >= maximumCoolingLevel { return true }
+        return fans.contains { fan in
+            guard let curveRPM = coolingTargetRPM(minimum: fan.minimumRPM,
+                                                  maximum: fan.maximumRPM,
+                                                  level: level) else { return false }
+            return curveRPM >= max(fan.actualRPM, fan.targetRPM) + takeoverMarginRPM
+        }
     }
 
-    static func curveCoolingLevel(curves: [FanControlCurve],
-                                  temperatures: [FanControlTemperatureReading],
-                                  previousLevel: Int? = nil) -> Int? {
-        guard let requested = evaluatedCurveCoolingLevel(curves: curves,
-                                                         temperatures: temperatures) else { return nil }
-        guard let previousLevel, requested < previousLevel else { return requested }
-        let warmerReadings = temperatures.map {
-            FanControlTemperatureReading(source: $0.source,
-                                         celsius: $0.celsius + curveHysteresis)
+    static func floorCoolingLevel(fans: [FanControlFanReading]) -> Int {
+        let levels = fans.compactMap { fan -> Int? in
+            guard validBounds(minimum: fan.minimumRPM, maximum: fan.maximumRPM) else { return nil }
+            let floorRPM = min(fan.maximumRPM, max(fan.minimumRPM, max(fan.actualRPM, fan.targetRPM)))
+            let fraction = (floorRPM - fan.minimumRPM) / (fan.maximumRPM - fan.minimumRPM)
+            return steppedCoolingLevel(fromFraction: fraction)
         }
-        guard let held = evaluatedCurveCoolingLevel(curves: curves,
-                                                    temperatures: warmerReadings) else { return nil }
-        return min(previousLevel, max(requested, held))
+        return levels.max() ?? minimumCoolingLevel
     }
 
-    private static func evaluatedCurveCoolingLevel(curves: [FanControlCurve],
-                                                   temperatures: [FanControlTemperatureReading]) -> Int? {
-        guard validCurves(curves) else { return nil }
-        let values = Dictionary(temperatures.map { ($0.source, $0.celsius) },
-                                uniquingKeysWith: { _, newest in newest })
-        var levels: [Int] = []
-        for curve in curves {
-            guard let temperature = values[curve.sensor], validTemperature(temperature) else {
-                return nil
-            }
-            levels.append(interpolatedCoolingLevel(points: curve.points,
-                                                   temperature: temperature))
-        }
-        return levels.max()
+    static func appliedCoolingLevel(_ level: Int, floorLevel: Int) -> Int {
+        guard validCoolingLevel(level) else { return floorLevel }
+        if level >= maximumCoolingLevel { return maximumCoolingLevel }
+        return max(level, min(maximumCoolingLevel, max(minimumCoolingLevel, floorLevel)))
     }
 
     static func interpolatedCoolingLevel(points: [FanControlCurvePoint],
@@ -336,6 +420,7 @@ enum FanControlPolicy {
     static func aggregatedTemperatures(
         cpuReadings: [(key: String, value: Double)],
         gpuReadings: [Double],
+        packageReadings: [Double] = [],
         platform: CPUTemperaturePlatform
     ) -> [FanControlTemperatureReading] {
         let validCPU = cpuReadings.filter {
@@ -357,20 +442,26 @@ enum FanControlPolicy {
             $0 >= TemperatureSensorSelector.minimumChipTemperature && validTemperature($0)
         }
         let soc = cpu + gpu
+        let package = packageReadings.first {
+            $0 >= TemperatureSensorSelector.minimumChipTemperature && validTemperature($0)
+        }
 
         var readings: [FanControlTemperatureReading] = []
-        if !soc.isEmpty {
-            readings.append(.init(source: .averageSoC,
-                                  celsius: soc.reduce(0, +) / Double(soc.count)))
-            if let hottest = soc.max() {
-                readings.append(.init(source: .hottestSoC, celsius: hottest))
-            }
+        if let package {
+            readings.append(.init(source: .packageCPU, celsius: package))
         }
         if !cpu.isEmpty {
             readings.append(.init(source: .averageCPU,
                                   celsius: cpu.reduce(0, +) / Double(cpu.count)))
             if let hottest = cpu.max() {
                 readings.append(.init(source: .hottestCPU, celsius: hottest))
+            }
+        }
+        if !soc.isEmpty {
+            readings.append(.init(source: .averageSoC,
+                                  celsius: soc.reduce(0, +) / Double(soc.count)))
+            if let hottest = soc.max() {
+                readings.append(.init(source: .hottestSoC, celsius: hottest))
             }
         }
         if let hottest = gpu.max() {

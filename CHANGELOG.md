@@ -175,6 +175,13 @@ Dynamic Island is the focus of this update, bringing music, timers, calendar, no
 ### Changed
 - The App Switcher opens more smoothly when many windows are open. Thanks to @bebricoOOOOOOf.
 
+- Fan Control now offers System, continuous Manual control from 0% to 100% and a
+  temperature curve driven by a selected sensor (CPU package, average or hottest
+  CPU, SoC or GPU) with a 0.5×–2.0× acceleration factor. The curve supplements
+  macOS above the start temperature, never lowers the captured system speed, and
+  returns to System when the Mac cools. It also shows current and target RPM for
+  every fan.
+
 ### Fixed
 - Clipboard History skips expired copies, reports failed writes and avoids automatic paste after failure. Thanks to @MaximilianMauroner.
 - Fan Control keeps trying to take over stopped fans on Macs that lack the firmware unlock key. Thanks to @Yash121l.

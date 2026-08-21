@@ -308,8 +308,9 @@ final class FeatureRuntime: ObservableObject {
             SystemMonitor.shared.planDidChange()
             let defaults = UserDefaults.standard
             let needsRecovery = defaults.bool(forKey: DefaultsKey.fanControlRecoveryNeeded)
+            let curveArmed = defaults.bool(forKey: DefaultsKey.fanControlCurveArmed)
             let hasRegisteredHelper = !(defaults.string(forKey: DefaultsKey.fanControlHelperVersion) ?? "").isEmpty
-            if needsRecovery || (!AppFeature.fanControl.isAvailable && hasRegisteredHelper) {
+            if needsRecovery || curveArmed || (!AppFeature.fanControl.isAvailable && hasRegisteredHelper) {
                 FanControlService.shared.syncWithPreferences()
             }
         },

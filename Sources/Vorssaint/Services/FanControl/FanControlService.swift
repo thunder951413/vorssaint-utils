@@ -19,6 +19,7 @@ final class FanControlService: ObservableObject {
     @Published private(set) var snapshot: FanControlSnapshot = .empty
     @Published private(set) var error: FanControlErrorCode?
     @Published private(set) var isWorking = false
+    @Published private(set) var isCurveArmed = false
 
     private let probeQueue = DispatchQueue(label: "com.vorssaint.fan-control.probe",
                                            qos: .utility)
@@ -26,11 +27,14 @@ final class FanControlService: ObservableObject {
     private var connection: NSXPCConnection?
     private var timer: Timer?
     private var panelIsVisible = false
+    private var isSleeping = false
+    private var helperUnreachable = false
     private var requestInFlight = false
     private var requestGeneration = 0
     private var tickCount = 0
     private var registrationAttemptedVersion: String?
     private var observingWorkspace = false
+    private var probeInFlight = false
 
     private static var appService: SMAppService {
         SMAppService.daemon(plistName: FanControlIdentifiers.plistName)
@@ -43,6 +47,7 @@ final class FanControlService: ObservableObject {
     }
 
     private init() {
+        isCurveArmed = UserDefaults.standard.bool(forKey: DefaultsKey.fanControlCurveArmed)
         refreshAccessState()
     }
 
@@ -58,11 +63,13 @@ final class FanControlService: ObservableObject {
     }
 
     func syncWithPreferences() {
+        isCurveArmed = UserDefaults.standard.bool(forKey: DefaultsKey.fanControlCurveArmed)
         if AppFeature.fanControl.isAvailable {
             if UserDefaults.standard.bool(forKey: DefaultsKey.fanControlRecoveryNeeded) {
                 restoreAutomatic()
             }
         } else {
+            setCurveArmed(false)
             restoreThenUnregister()
         }
     }
@@ -70,7 +77,7 @@ final class FanControlService: ObservableObject {
     func panelDidAppear() {
         panelIsVisible = true
         startObservingSystemState()
-        refresh()
+        refreshLocalProbe()
         startTimerIfNeeded()
     }
 
@@ -81,7 +88,7 @@ final class FanControlService: ObservableObject {
 
     func refresh() {
         refreshAccessState()
-        if accessState == .enabled {
+        if accessState == .enabled, !helperUnreachable {
             guard !replaceRegistrationIfNeeded() else { return }
             requestStatus()
         } else {
@@ -95,6 +102,7 @@ final class FanControlService: ObservableObject {
         case .requiresApproval:
             SMAppService.openSystemSettingsLoginItems()
         case .enabled:
+            helperUnreachable = false
             requestStatus()
         case .unavailable:
             error = .helperUnavailable
@@ -125,11 +133,35 @@ final class FanControlService: ObservableObject {
     }
 
     func applyConfiguration(_ configuration: FanControlConfiguration) {
+        applyConfiguration(configuration, userInitiated: true)
+    }
+
+    func applyStoredCurve(userInitiated: Bool) {
+        guard userInitiated || (!isSleeping && !helperUnreachable && !isWorking && !requestInFlight) else { return }
+        let defaults = UserDefaults.standard
+        let sensor = FanControlTemperatureSource(
+            rawValue: defaults.string(forKey: DefaultsKey.fanControlSensor) ?? "")
+            ?? FanControlPolicy.defaultSensor
+        applyConfiguration(
+            .curve(sensor: sensor,
+                   threshold: FanControlPolicy.clampedThreshold(
+                    defaults.object(forKey: DefaultsKey.fanControlThreshold) as? Int
+                        ?? FanControlPolicy.defaultThreshold),
+                   accelerationFactor: FanControlPolicy.clampAccelerationFactor(
+                    defaults.object(forKey: DefaultsKey.fanControlAcceleration) as? Double
+                        ?? FanControlPolicy.defaultAccelerationFactor)),
+            userInitiated: userInitiated
+        )
+    }
+
+    func applyConfiguration(_ configuration: FanControlConfiguration, userInitiated: Bool) {
+        guard userInitiated || (!isWorking && !requestInFlight) else { return }
         guard FanControlPolicy.validConfiguration(configuration) else {
             error = .controlFailed
             return
         }
         if configuration.mode == .system {
+            setCurveArmed(false)
             restoreAutomatic()
             return
         }
@@ -140,33 +172,58 @@ final class FanControlService: ObservableObject {
         }
         error = nil
         let retrySnapshot = snapshot
+        let armCurve = configuration.mode == .curve
         startObservingSystemState()
         let generation = beginRequest()
         UserDefaults.standard.set(true, forKey: DefaultsKey.fanControlRecoveryNeeded)
-        isWorking = true
+        if userInitiated { isWorking = true }
         send({ proxy, reply in
             proxy.applyConfiguration(encodedConfiguration, withReply: reply)
         }) { response in
-            guard self.finishRequest(generation) else { return }
-            self.isWorking = false
+            let matches = self.finishRequest(generation)
+            if userInitiated { self.isWorking = false }
+            guard matches else { return }
             guard let response else {
-                self.error = .helperUnavailable
-                self.restoreAutomatic()
+                self.markHelperUnreachable(.helperUnavailable)
                 return
             }
+            self.helperUnreachable = false
             self.apply(response)
-            if response.succeeded, response.snapshot.isCooling {
-                self.startTimerIfNeeded()
+            if response.succeeded {
+                self.setCurveArmed(armCurve)
+                if response.snapshot.isCooling {
+                    self.startTimerIfNeeded()
+                } else {
+                    UserDefaults.standard.removeObject(forKey: DefaultsKey.fanControlRecoveryNeeded)
+                    if armCurve {
+                        self.startTimerIfNeeded()
+                    } else {
+                        self.restoreAutomatic(supersedingCurrentRequest: false,
+                                              preserving: response.error,
+                                              retrySnapshot: retrySnapshot)
+                    }
+                }
             } else {
                 self.restoreAutomatic(supersedingCurrentRequest: false,
                                       preserving: response.error ?? .controlFailed,
                                       retrySnapshot: retrySnapshot)
+                if self.snapshot.fans.isEmpty { self.refreshLocalProbe() }
             }
         }
     }
 
     func restoreAutomatic() {
+        setCurveArmed(false)
         restoreAutomatic(supersedingCurrentRequest: false)
+    }
+
+    private func setCurveArmed(_ armed: Bool) {
+        isCurveArmed = armed
+        if armed {
+            UserDefaults.standard.set(true, forKey: DefaultsKey.fanControlCurveArmed)
+        } else {
+            UserDefaults.standard.removeObject(forKey: DefaultsKey.fanControlCurveArmed)
+        }
     }
 
     private func restoreAutomatic(supersedingCurrentRequest: Bool,
@@ -182,7 +239,10 @@ final class FanControlService: ObservableObject {
             guard self.finishRequest(generation) else { return }
             self.isWorking = false
             guard let response else {
-                self.error = .helperUnavailable
+                self.markHelperUnreachable(.helperUnavailable)
+                if let retrySnapshot, self.snapshot.fans.isEmpty {
+                    self.snapshot = retrySnapshot
+                }
                 return
             }
             self.apply(response)
@@ -286,9 +346,10 @@ final class FanControlService: ObservableObject {
         send { proxy, reply in proxy.status(withReply: reply) } completion: { response in
             guard self.finishRequest(generation) else { return }
             guard let response else {
-                self.error = .helperUnavailable
+                self.markHelperUnreachable(.helperUnavailable)
                 return
             }
+            self.helperUnreachable = false
             self.apply(response)
             // Any decoded reply proves that the installed helper speaks this
             // protocol, even when the hardware itself is unsupported.
@@ -296,6 +357,9 @@ final class FanControlService: ObservableObject {
                                       forKey: DefaultsKey.fanControlHelperVersion)
             if response.succeeded, !response.snapshot.isCooling {
                 UserDefaults.standard.removeObject(forKey: DefaultsKey.fanControlRecoveryNeeded)
+            }
+            if self.snapshot.fans.isEmpty, response.error != .noFans {
+                self.refreshLocalProbe()
             }
         }
     }
@@ -310,7 +374,16 @@ final class FanControlService: ObservableObject {
                 completion(response)
             }
         }
+        let timeout = DispatchWorkItem { [weak self] in
+            finish(nil)
+            DispatchQueue.main.async {
+                self?.connection?.invalidate()
+                self?.connection = nil
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: timeout)
         guard let proxy = proxy(errorHandler: { [weak self] failedConnection in
+            timeout.cancel()
             DispatchQueue.main.async {
                 if self?.connection === failedConnection {
                     failedConnection.invalidate()
@@ -319,10 +392,12 @@ final class FanControlService: ObservableObject {
                 finish(nil)
             }
         }) else {
+            timeout.cancel()
             finish(nil)
             return
         }
         operation(proxy) { data in
+            timeout.cancel()
             finish(FanControlIPC.decode(data))
         }
     }
@@ -360,7 +435,7 @@ final class FanControlService: ObservableObject {
         send { proxy, reply in proxy.heartbeat(withReply: reply) } completion: { response in
             guard self.finishRequest(generation) else { return }
             guard let response else {
-                self.error = .helperUnavailable
+                self.markHelperUnreachable(.helperUnavailable)
                 return
             }
             self.apply(response)
@@ -372,8 +447,32 @@ final class FanControlService: ObservableObject {
     }
 
     private func apply(_ response: FanControlResponse) {
-        snapshot = response.snapshot
+        if !response.snapshot.fans.isEmpty
+            || response.error == .noFans
+            || response.error == .unsupportedHardware
+            || snapshot.fans.isEmpty {
+            snapshot = response.snapshot
+        } else {
+            var merged = snapshot
+            merged.isCooling = response.snapshot.isCooling
+            merged.endsAt = response.snapshot.endsAt
+            merged.stopReason = response.snapshot.stopReason
+            merged.coolingLevel = response.snapshot.coolingLevel
+            merged.configuration = response.snapshot.configuration
+            if let temperatures = response.snapshot.temperatures {
+                merged.temperatures = temperatures
+            }
+            snapshot = merged
+        }
         error = response.error
+    }
+
+    private func markHelperUnreachable(_ failure: FanControlErrorCode) {
+        helperUnreachable = true
+        error = failure
+        connection?.invalidate()
+        connection = nil
+        refreshLocalProbe()
     }
 
     private func beginRequest() -> Int {
@@ -413,11 +512,17 @@ final class FanControlService: ObservableObject {
               !UserDefaults.standard.bool(forKey: DefaultsKey.fanControlRecoveryNeeded) else { return false }
         registrationAttemptedVersion = current
         isWorking = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [weak self] in
+            guard let self, self.isWorking,
+                  self.registrationAttemptedVersion == current else { return }
+            self.isWorking = false
+            self.markHelperUnreachable(.helperUnavailable)
+        }
         Self.appService.unregister { error in
             DispatchQueue.main.async {
                 guard error == nil else {
                     self.isWorking = false
-                    self.error = .helperUnavailable
+                    self.markHelperUnreachable(.helperUnavailable)
                     return
                 }
                 do {
@@ -429,7 +534,7 @@ final class FanControlService: ObservableObject {
                 } catch {
                     self.isWorking = false
                     self.refreshAccessState()
-                    self.error = .helperUnavailable
+                    self.markHelperUnreachable(.helperUnavailable)
                 }
             }
         }
@@ -437,7 +542,12 @@ final class FanControlService: ObservableObject {
     }
 
     private func refreshLocalProbe() {
+        guard !probeInFlight else { return }
+        probeInFlight = true
         probeQueue.async {
+            defer {
+                DispatchQueue.main.async { self.probeInFlight = false }
+            }
             if self.probeHardware == nil { self.probeHardware = FanControlHardware() }
             let result: Result<FanControlSnapshot, FanControlErrorCode>
             guard let probe = self.probeHardware else {
@@ -471,23 +581,57 @@ final class FanControlService: ObservableObject {
     }
 
     private func applyProbe(_ result: Result<FanControlSnapshot, FanControlErrorCode>) {
-        guard accessState != .enabled else { return }
         switch result {
         case .success(let snapshot):
             applyProbeSnapshot(snapshot,
                                error: snapshot.fans.contains(where: \.isManuallyControlled)
                                    ? .alreadyControlled : nil)
         case .failure(let error):
-            snapshot = .empty
-            self.error = error
+            if self.snapshot.fans.isEmpty {
+                self.snapshot = .empty
+            }
+            if self.error == nil { self.error = error }
         }
     }
 
     private func applyProbeSnapshot(_ snapshot: FanControlSnapshot,
                                     error: FanControlErrorCode?) {
-        guard accessState != .enabled else { return }
-        self.snapshot = snapshot
-        self.error = error
+        if !snapshot.fans.isEmpty {
+            var next = snapshot
+            if self.snapshot.isCooling {
+                next.isCooling = true
+                next.coolingLevel = self.snapshot.coolingLevel
+                next.configuration = self.snapshot.configuration
+                next.endsAt = self.snapshot.endsAt
+                next.stopReason = self.snapshot.stopReason
+            }
+            if !Self.displayEquivalent(next, self.snapshot) {
+                self.snapshot = next
+            }
+        }
+        if error == .alreadyControlled {
+            self.error = error
+        } else if self.error == .noFans || self.error == .unsupportedHardware {
+            self.error = error
+        }
+    }
+
+    private static func displayEquivalent(_ lhs: FanControlSnapshot, _ rhs: FanControlSnapshot) -> Bool {
+        guard lhs.fans.count == rhs.fans.count,
+              lhs.isCooling == rhs.isCooling else { return false }
+        let fansMatch = zip(lhs.fans, rhs.fans).allSatisfy { left, right in
+            left.index == right.index
+                && left.isManuallyControlled == right.isManuallyControlled
+                && abs(left.actualRPM - right.actualRPM) < 40
+                && abs(left.targetRPM - right.targetRPM) < 40
+        }
+        guard fansMatch else { return false }
+        let leftTemps = lhs.temperatures ?? []
+        let rightTemps = rhs.temperatures ?? []
+        guard leftTemps.count == rightTemps.count else { return false }
+        return zip(leftTemps, rightTemps).allSatisfy { left, right in
+            left.source == right.source && abs(left.celsius - right.celsius) < 0.5
+        }
     }
 
     private func restoreThenUnregister() {
@@ -532,19 +676,45 @@ final class FanControlService: ObservableObject {
     // MARK: - Timers and system state
 
     private func startTimerIfNeeded() {
-        guard panelIsVisible || snapshot.isCooling
+        guard panelIsVisible || snapshot.isCooling || isCurveArmed
                 || UserDefaults.standard.bool(forKey: DefaultsKey.fanControlRecoveryNeeded) else { return }
         startObservingSystemState()
         guard timer == nil else { return }
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             guard let self else { return }
             self.tickCount += 1
             if self.snapshot.isCooling {
                 self.heartbeat()
-            } else if self.panelIsVisible, self.error != .controlFailed,
-                      self.tickCount.isMultiple(of: 2) {
-                self.refresh()
+                return
             }
+            if self.panelIsVisible {
+                self.refreshLocalProbe()
+            }
+            self.tryTakeOverIfNeeded()
+        }
+    }
+
+    private func tryTakeOverIfNeeded() {
+        guard isCurveArmed, !snapshot.isCooling, !helperUnreachable, !isSleeping,
+              !isWorking, !requestInFlight else { return }
+        let defaults = UserDefaults.standard
+        let sensor = FanControlTemperatureSource(
+            rawValue: defaults.string(forKey: DefaultsKey.fanControlSensor) ?? "")
+            ?? FanControlPolicy.defaultSensor
+        switch FanControlPolicy.curveDemand(
+            sensor: sensor,
+            threshold: FanControlPolicy.clampedThreshold(
+                defaults.object(forKey: DefaultsKey.fanControlThreshold) as? Int
+                    ?? FanControlPolicy.defaultThreshold),
+            accelerationFactor: FanControlPolicy.clampAccelerationFactor(
+                defaults.object(forKey: DefaultsKey.fanControlAcceleration) as? Double
+                    ?? FanControlPolicy.defaultAccelerationFactor),
+            temperatures: snapshot.temperatures ?? []
+        ) {
+        case .cooling:
+            applyStoredCurve(userInitiated: false)
+        case .belowThreshold, .unavailable:
+            break
         }
         // The helper drops cooling once a heartbeat is `heartbeatLimit` seconds
         // old, so a second's cadence has six to spare; matching the leeway the
@@ -554,7 +724,7 @@ final class FanControlService: ObservableObject {
     }
 
     private func stopIdleWorkIfPossible() {
-        guard !panelIsVisible, !snapshot.isCooling,
+        guard !panelIsVisible, !snapshot.isCooling, !isCurveArmed,
               !UserDefaults.standard.bool(forKey: DefaultsKey.fanControlRecoveryNeeded) else { return }
         timer?.invalidate()
         timer = nil
@@ -580,14 +750,18 @@ final class FanControlService: ObservableObject {
     }
 
     @objc private func workspaceWillSleep() {
-        if UserDefaults.standard.bool(forKey: DefaultsKey.fanControlRecoveryNeeded) {
+        isSleeping = true
+        if UserDefaults.standard.bool(forKey: DefaultsKey.fanControlRecoveryNeeded) || isCurveArmed {
             restoreAutomatic(supersedingCurrentRequest: true)
         }
     }
 
     @objc private func workspaceDidWake() {
+        isSleeping = false
         if UserDefaults.standard.bool(forKey: DefaultsKey.fanControlRecoveryNeeded) {
             restoreAutomatic(supersedingCurrentRequest: true)
+        } else if isCurveArmed {
+            applyStoredCurve(userInitiated: false)
         } else if panelIsVisible {
             refresh()
         }
