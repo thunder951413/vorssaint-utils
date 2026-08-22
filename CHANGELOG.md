@@ -181,6 +181,11 @@ Dynamic Island is the focus of this update, bringing music, timers, calendar, no
   macOS above the start temperature, never lowers the captured system speed, and
   returns to System when the Mac cools. It also shows current and target RPM for
   every fan.
+- Fan Control's temperature curve keeps following the selected sensor after its
+  panel closes instead of freezing on stale readings until the panel reopens.
+- A slow Fan Control reply no longer tears down a newer helper connection, and
+  Manual and curve changes wait out the helper's multi-second force-start
+  recovery before reporting it as unreachable.
 
 ### Fixed
 - Clipboard History skips expired copies, reports failed writes and avoids automatic paste after failure. Thanks to @MaximilianMauroner.

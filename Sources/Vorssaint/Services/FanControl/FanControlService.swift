@@ -31,7 +31,6 @@ final class FanControlService: ObservableObject {
     private var helperUnreachable = false
     private var requestInFlight = false
     private var requestGeneration = 0
-    private var tickCount = 0
     private var registrationAttemptedVersion: String?
     private var observingWorkspace = false
     private var probeInFlight = false
@@ -177,9 +176,9 @@ final class FanControlService: ObservableObject {
         let generation = beginRequest()
         UserDefaults.standard.set(true, forKey: DefaultsKey.fanControlRecoveryNeeded)
         if userInitiated { isWorking = true }
-        send({ proxy, reply in
+        send(replyTimeout: Self.controlReplyTimeout) { proxy, reply in
             proxy.applyConfiguration(encodedConfiguration, withReply: reply)
-        }) { response in
+        } completion: { response in
             let matches = self.finishRequest(generation)
             if userInitiated { self.isWorking = false }
             guard matches else { return }
@@ -235,7 +234,9 @@ final class FanControlService: ObservableObject {
         let generation = beginRequest()
         isWorking = true
         startTimerIfNeeded()
-        send { proxy, reply in proxy.restoreAutomatic(withReply: reply) } completion: { response in
+        send(replyTimeout: Self.controlReplyTimeout) { proxy, reply in
+            proxy.restoreAutomatic(withReply: reply)
+        } completion: { response in
             guard self.finishRequest(generation) else { return }
             self.isWorking = false
             guard let response else {
@@ -272,7 +273,9 @@ final class FanControlService: ObservableObject {
     }
 
     private func restoreBeforeTermination() {
-        send { proxy, reply in proxy.restoreAutomatic(withReply: reply) } completion: { response in
+        send(replyTimeout: Self.controlReplyTimeout) { proxy, reply in
+            proxy.restoreAutomatic(withReply: reply)
+        } completion: { response in
             if let response, response.succeeded, !response.snapshot.isCooling {
                 UserDefaults.standard.removeObject(forKey: DefaultsKey.fanControlRecoveryNeeded)
             }
@@ -340,6 +343,12 @@ final class FanControlService: ObservableObject {
 
     // MARK: - Requests
 
+    /// Status and heartbeat replies only read SMC state; anything slower means
+    /// the helper is wedged. Control requests can legitimately take longer:
+    /// the stopped-fan force-start path sleeps and retries for tens of seconds.
+    private static let statusReplyTimeout: TimeInterval = 8
+    private static let controlReplyTimeout: TimeInterval = 40
+
     private func requestStatus() {
         guard !requestInFlight else { return }
         let generation = beginRequest()
@@ -364,7 +373,8 @@ final class FanControlService: ObservableObject {
         }
     }
 
-    private func send(_ operation: @escaping (FanControlXPCProtocol, @escaping (Data) -> Void) -> Void,
+    private func send(replyTimeout: TimeInterval = FanControlService.statusReplyTimeout,
+                      _ operation: @escaping (FanControlXPCProtocol, @escaping (Data) -> Void) -> Void,
                       completion: @escaping (FanControlResponse?) -> Void) {
         var finished = false
         let finish: (FanControlResponse?) -> Void = { response in
@@ -374,16 +384,9 @@ final class FanControlService: ObservableObject {
                 completion(response)
             }
         }
-        let timeout = DispatchWorkItem { [weak self] in
-            finish(nil)
-            DispatchQueue.main.async {
-                self?.connection?.invalidate()
-                self?.connection = nil
-            }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: timeout)
-        guard let proxy = proxy(errorHandler: { [weak self] failedConnection in
-            timeout.cancel()
+        var timeoutWorkItem: DispatchWorkItem?
+        guard let remote = proxy(errorHandler: { [weak self] failedConnection in
+            timeoutWorkItem?.cancel()
             DispatchQueue.main.async {
                 if self?.connection === failedConnection {
                     failedConnection.invalidate()
@@ -392,17 +395,34 @@ final class FanControlService: ObservableObject {
                 finish(nil)
             }
         }) else {
-            timeout.cancel()
             finish(nil)
             return
         }
-        operation(proxy) { data in
+        // Whichever of the reply, the error handler or the timeout claims the
+        // finished flag first wins; the losers must do nothing at all, so a
+        // late timeout can never tear down a connection a newer request,
+        // sharing the same connection, still has in flight.
+        let sentConnection = remote.connection
+        let timeout = DispatchWorkItem { [weak self] in
+            DispatchQueue.main.async {
+                guard !finished else { return }
+                finished = true
+                completion(nil)
+                guard self?.connection === sentConnection else { return }
+                sentConnection.invalidate()
+                self?.connection = nil
+            }
+        }
+        timeoutWorkItem = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + replyTimeout, execute: timeout)
+        operation(remote.proxy) { data in
             timeout.cancel()
             finish(FanControlIPC.decode(data))
         }
     }
 
-    private func proxy(errorHandler: @escaping (NSXPCConnection) -> Void) -> FanControlXPCProtocol? {
+    private func proxy(errorHandler: @escaping (NSXPCConnection) -> Void)
+        -> (proxy: FanControlXPCProtocol, connection: NSXPCConnection)? {
         if connection == nil {
             let connection = NSXPCConnection(machServiceName: FanControlIdentifiers.helperID,
                                              options: .privileged)
@@ -425,8 +445,9 @@ final class FanControlService: ObservableObject {
             self.connection = connection
         }
         guard let connection else { return nil }
-        return connection.remoteObjectProxyWithErrorHandler { _ in errorHandler(connection) }
-            as? FanControlXPCProtocol
+        guard let remoteObject = connection.remoteObjectProxyWithErrorHandler(
+                { _ in errorHandler(connection) }) as? FanControlXPCProtocol else { return nil }
+        return (remoteObject, connection)
     }
 
     private func heartbeat() {
@@ -653,7 +674,9 @@ final class FanControlService: ObservableObject {
         }
         let generation = beginRequest()
         isWorking = true
-        send { proxy, reply in proxy.restoreAutomatic(withReply: reply) } completion: { response in
+        send(replyTimeout: Self.controlReplyTimeout) { proxy, reply in
+            proxy.restoreAutomatic(withReply: reply)
+        } completion: { response in
             guard self.finishRequest(generation) else { return }
             self.isWorking = false
             guard let response, response.succeeded, !response.snapshot.isCooling else { return }
@@ -682,12 +705,13 @@ final class FanControlService: ObservableObject {
         guard timer == nil else { return }
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             guard let self else { return }
-            self.tickCount += 1
             if self.snapshot.isCooling {
                 self.heartbeat()
                 return
             }
-            if self.panelIsVisible {
+            // An armed curve keeps watching temperatures while the panel is
+            // closed; without fresh local reads it would act on stale data.
+            if self.panelIsVisible || self.isCurveArmed {
                 self.refreshLocalProbe()
             }
             self.tryTakeOverIfNeeded()

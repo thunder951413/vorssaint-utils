@@ -33,8 +33,6 @@ enum FanControlIdentifiers {
         return "identifier \"\(helperID)\""
     }
 
-    static var isAdHocSigned: Bool { signingTeamID == nil }
-
     static var signingTeamID: String? {
         var code: SecCode?
         guard SecCodeCopySelf(SecCSFlags(), &code) == errSecSuccess, let code else { return nil }
