@@ -69,7 +69,12 @@ enum FanControlLifecycleTests {
         let originalTimer = armed.timer
         armed.syncWithPreferences()
         suite.expect(armed.timer === originalTimer, "preference sync does not duplicate the timer")
-        RunLoop.main.run(mode: .eventTracking, before: Date().addingTimeInterval(2.3))
+        // A run-loop iteration may return for an unrelated event before the
+        // timer fires. Keep tracking until the poll itself arrives.
+        let pollDeadline = Date().addingTimeInterval(3)
+        while armed.takeovers == 0, Date() < pollDeadline {
+            RunLoop.main.run(mode: .eventTracking, before: pollDeadline)
+        }
         suite.expect(armed.takeovers > 0 && armed.probes > 2,
                      "curve polling continues while the menu is tracking")
         armed.timer?.invalidate()

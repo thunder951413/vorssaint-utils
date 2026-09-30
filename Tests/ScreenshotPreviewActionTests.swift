@@ -12,7 +12,7 @@ enum ScreenshotPreviewActionTests {
         var performingAction = false
         var dismissWork: DispatchWorkItem?
         var dismissSchedules = 0
-        var action: (Action) async -> Set<Action> = { _ in [] }
+        var action: @MainActor (Action) async -> Set<Action> = { _ in [] }
         func close() { closed = true }
         func scheduleAutoDismiss() { dismissSchedules += 1 }
     }

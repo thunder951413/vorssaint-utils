@@ -628,6 +628,7 @@ final class ScreenshotService: ObservableObject {
     }
 
     @discardableResult
+    @MainActor
     private func copyDirect(_ capture: ScreenshotSelectionController.Capture) async -> Bool {
         guard let export = flatten(capture) else { return false }
         guard await ScreenshotEditorController.copyImage(
@@ -662,6 +663,7 @@ final class ScreenshotService: ObservableObject {
     /// The copy half is reported honestly: when the pasteboard write fails
     /// the HUD keeps the plain saved message, so the caller leaves the Copy
     /// button available instead of claiming work that never happened.
+    @MainActor
     private func saveAndCopyDirect(_ capture: ScreenshotSelectionController.Capture)
         async -> (outcome: SaveOutcome, copied: Bool)? {
         guard let export = flatten(capture),

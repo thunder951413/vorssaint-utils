@@ -480,7 +480,7 @@ def main():
     preview = "Sources/Vorssaint/Services/QuickTools/ScreenshotQuickPreviewController.swift"
     write("ScreenshotPreviewActions.swift", "import Foundation\n"
           + "extension ScreenshotPreviewActionTests {\nfinal class Controller: State {\n"
-          + declaration(preview, "    private func runDefaultAction(").replace("private func", "func", 1)
+          + declaration(preview, "    private func runDefaultAction(").replace("private func", "@MainActor func", 1)
           + declaration(preview, "    private func perform(_ requested:").replace("private func", "func", 1)
           + "}\n}\n")
     selection = "Sources/Vorssaint/Services/QuickTools/ScreenshotSelectionController.swift"

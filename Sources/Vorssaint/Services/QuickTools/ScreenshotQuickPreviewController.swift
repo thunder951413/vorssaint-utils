@@ -34,7 +34,7 @@ final class ScreenshotQuickPreviewController {
     /// save-and-copy can succeed by halves, and only the done halves gray
     /// their buttons out. Empty means the action failed entirely.
     private var performingAction = false
-    private let action: (Action) async -> Set<Action>
+    private let action: @MainActor (Action) async -> Set<Action>
     private let share: (ScreenshotShareDuration,
                         @escaping (ScreenshotShareRecord?) -> Void) -> Void
     private let onClose: () -> Void
@@ -57,7 +57,7 @@ final class ScreenshotQuickPreviewController {
     init(capture: ScreenshotSelectionController.Capture,
          strings: ScreenshotFeatureStrings,
          defaultAction: ScreenshotDefaultAction,
-         action: @escaping (Action) async -> Set<Action>,
+         action: @escaping @MainActor (Action) async -> Set<Action>,
          share: @escaping (ScreenshotShareDuration,
                            @escaping (ScreenshotShareRecord?) -> Void) -> Void,
          onClose: @escaping () -> Void) {
@@ -171,6 +171,7 @@ final class ScreenshotQuickPreviewController {
     /// stays up as confirmation, and the person can still edit or discard
     /// from it. Edit never reaches here, the service routes it straight
     /// into the editor without a preview.
+    @MainActor
     private func runDefaultAction(_ defaultAction: ScreenshotDefaultAction) async -> Bool {
         let mapped: Action
         switch defaultAction {
