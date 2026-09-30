@@ -278,8 +278,7 @@ struct KillProcessView: View {
     // MARK: Helpers
 
     private func copy(_ value: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(value, forType: .string)
+        GeneralPasteboardAccess.shared.copyString(value)
     }
 
     /// Ticks only while this page is open AND its window is key, so the

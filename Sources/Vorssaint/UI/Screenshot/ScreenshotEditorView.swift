@@ -1337,10 +1337,12 @@ private struct ScreenshotEditorSharedLinkView: View {
             HStack {
                 Spacer()
                 Button {
-                    if ScreenshotShareService.shared.copy(record.url) {
-                        QuickToolHUD.show(icon: "link", message: strings.sharedHUD)
-                    } else {
-                        NSSound.beep()
+                    Task { @MainActor in
+                        if await ScreenshotShareService.shared.copy(record.url) {
+                            QuickToolHUD.show(icon: "link", message: strings.sharedHUD)
+                        } else {
+                            NSSound.beep()
+                        }
                     }
                 } label: {
                     Label(strings.copyLink, systemImage: "doc.on.doc")

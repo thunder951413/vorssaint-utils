@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Vorssaint
 
 import Foundation
+import AppKit
 
 struct ClipboardHistoryAccessTests {
     static func run(_ suite: TestSuite) {
@@ -127,6 +128,54 @@ struct ClipboardHistoryAccessTests {
         pump { overdueCompletions == 1 }
         suite.expect(overdueAnswer == nil && overdueCompletions == 1,
                "result queued on main cannot succeed after its deadline")
+
+        let clipboard = FakeHistoryPasteboard()
+        let copyClock = TestClock()
+        let copyDeadlines = ManualDeadlineScheduler(clock: copyClock)
+        let copies = GeneralPasteboardAccess(label: "Vorssaint.Tests.CopyActions",
+                                              now: copyClock.read,
+                                              scheduleDeadline: copyDeadlines.schedule,
+                                              pasteboard: { clipboard })
+        var copied: Bool?
+        copies.copyString("copied") { copied = $0 }
+        pump { copied != nil }
+        suite.expect(copied == true && clipboard.strings == ["copied"],
+                     "copy helper reports the actual serialized write")
+        clipboard.rejectedOperations = ["string"]
+        copied = nil
+        copies.copyString("failed") { copied = $0 }
+        pump { copied != nil }
+        suite.expect(copied == false, "copy helper never reports success for a rejected write")
+
+        let blocker = DispatchSemaphore(value: 0)
+        let blocked = DispatchSemaphore(value: 0)
+        copies.async { blocked.signal(); _ = blocker.wait(timeout: .now() + 2) }
+        suite.expect(blocked.wait(timeout: .now() + 1) == .success, "copy lane can be held behind a provider")
+        copied = nil
+        let previousOperations = clipboard.operations
+        copies.copyString("expired") { copied = $0 }
+        copyClock.advance(by: 3)
+        blocker.signal()
+        pump { copied != nil }
+        suite.expect(copied == false && clipboard.operations == previousOperations,
+                     "queued copy expires without clearing newer clipboard contents")
+
+        let taskBlocker = DispatchSemaphore(value: 0)
+        let taskEntered = DispatchSemaphore(value: 0)
+        copies.async { taskEntered.signal(); _ = taskBlocker.wait(timeout: .now() + 2) }
+        suite.expect(taskEntered.wait(timeout: .now() + 1) == .success, "cancellation fixture blocks the lane")
+        var cancelledResult: Bool?
+        var taskStarted = false
+        let task = Task { @MainActor in
+            taskStarted = true
+            cancelledResult = await copies.writeObjects([NSURL(fileURLWithPath: "/tmp/test-copy")])
+        }
+        pump { taskStarted }
+        task.cancel()
+        taskBlocker.signal()
+        pump { cancelledResult != nil }
+        suite.expect(cancelledResult == false && clipboard.operations == previousOperations,
+                     "cancelled asynchronous copy never mutates the clipboard")
     }
 
     private static func pump(until condition: () -> Bool) {

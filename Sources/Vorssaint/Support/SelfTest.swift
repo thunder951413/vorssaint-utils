@@ -109,6 +109,18 @@ enum SelfTest {
 
         // Tools/MakeIcon.swift writes the glyph PNGs at BlackHoleGlyph.pointSize.
         // Changing the canvas in one and not the other would squash the glyph.
+        if Bundle.main.bundleURL.pathExtension == "app" {
+            for (resource, scale) in [("MenuBarIcon", 1), ("MenuBarIcon@2x", 2)] {
+                guard let url = Bundle.main.url(forResource: resource, withExtension: "png"),
+                      let data = try? Data(contentsOf: url),
+                      let rep = NSBitmapImageRep(data: data),
+                      rep.pixelsWide == Int(BlackHoleGlyph.pointSize.width) * scale,
+                      rep.pixelsHigh == Int(BlackHoleGlyph.pointSize.height) * scale else {
+                    failures.append("bundled \(resource) asset missing or invalid")
+                    continue
+                }
+            }
+        }
         if Bundle.main.url(forResource: "MenuBarIcon", withExtension: "png") == nil {
             warnings.append("menu bar glyph asset not bundled")
         } else if let rep = BlackHoleGlyph.image(active: false)?

@@ -353,7 +353,9 @@ private struct RecorderSharedLinksView: View {
             }
             Spacer(minLength: 8)
             Button {
-                sharing.copy(record.url)
+                Task { @MainActor in
+                    if await !sharing.copy(record.url) { NSSound.beep() }
+                }
             } label: {
                 Image(systemName: "doc.on.doc")
             }

@@ -70,8 +70,11 @@ final class ScreenTextService: ObservableObject {
                     // the panel offers copy and, for a link, open.
                     QRResultController.shared.show(reading: reading)
                 case .text(let text):
-                    Self.copyToPasteboard(text)
-                    QuickToolHUD.show(icon: "text.viewfinder", message: strings.ocrCopied)
+                    GeneralPasteboardAccess.shared.copyString(text) { [weak self] succeeded in
+                        guard self?.recognitionGeneration == generation else { return }
+                        guard succeeded else { NSSound.beep(); return }
+                        QuickToolHUD.show(icon: "text.viewfinder", message: strings.ocrCopied)
+                    }
                 case .empty:
                     QuickToolHUD.show(icon: "text.viewfinder", message: strings.ocrNoText)
                 }
@@ -135,9 +138,4 @@ final class ScreenTextService: ObservableObject {
         }
     }
 
-    private static func copyToPasteboard(_ value: String) {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(value, forType: .string)
-    }
 }

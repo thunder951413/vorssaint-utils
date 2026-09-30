@@ -726,6 +726,17 @@ enum UpdateFeatureTests {
         let cancelledScript = AppleScriptRunner.runDetailed("error number -128")
         suite.expect(!cancelledScript.ok && cancelledScript.errorNumber == -128,
                "in-process AppleScript preserves cancellation as a failed request")
+        var backgroundScript: (ok: Bool, output: String)?
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = AppleScriptRunner.run(#"do shell script "/usr/bin/printf background-probe""#)
+            DispatchQueue.main.async { backgroundScript = result }
+        }
+        let scriptDeadline = Date().addingTimeInterval(5)
+        while backgroundScript == nil, Date() < scriptDeadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.005))
+        }
+        suite.expect(backgroundScript?.ok == true && backgroundScript?.output == "background-probe",
+                     "each background AppleScript owns its script and executes without blocking main")
 
         let hiddenLayout = WindowLayoutAction.hiddenActions(from: "leftHalf, restore,bogus")
         suite.expect(hiddenLayout == [.leftHalf, .restore],

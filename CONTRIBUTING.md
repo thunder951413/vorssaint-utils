@@ -13,7 +13,7 @@ under GPL-3.0-or-later.
 git clone https://github.com/vorssaint/vorssaint-utils.git
 cd vorssaint-utils
 ./build.sh                         # build and assemble the bundle
-./build/Vorssaint --selftest       # quick health check (SELFTEST OK)
+./build/stage/Vorssaint.app/Contents/MacOS/Vorssaint --selftest       # quick health check (SELFTEST OK)
 ./build.sh --install               # install into /Applications and launch
 ```
 
@@ -69,7 +69,7 @@ and falls back to the self signed identity, then to ad hoc.
 
 A few conventions to keep in mind.
 
-- **UI observes services, and services never import SwiftUI.** Keep that boundary.
+- **UI observes services.** Keep business logic independent of SwiftUI. Presentation controllers in `Services` may host SwiftUI views; place view composition in `UI` when practical.
 - Singletons are exposed as `Type.shared` and publish state with Combine through
   `ObservableObject`, with no Observation macros, since the project builds with
   the Command Line Tools.

@@ -89,11 +89,11 @@ final class QRResultController {
     }
 
     private func copy(_ payload: String) {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(payload, forType: .string)
-        close()
-        QuickToolHUD.show(icon: "qrcode", message: L10n.shared.s.ocrQRCopied)
+        GeneralPasteboardAccess.shared.copyString(payload) { [weak self] succeeded in
+            guard succeeded else { NSSound.beep(); return }
+            self?.close()
+            QuickToolHUD.show(icon: "qrcode", message: L10n.shared.s.ocrQRCopied)
+        }
     }
 
     private func open(_ url: URL) {

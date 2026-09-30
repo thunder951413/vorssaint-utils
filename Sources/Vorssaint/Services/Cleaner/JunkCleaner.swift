@@ -290,15 +290,10 @@ final class JunkCleaner: ObservableObject {
         guard let plist = NSDictionary(contentsOf: plistURL) as? [String: Any],
               let label = plist["Label"] as? String, !label.isEmpty,
               !label.contains("/"), !label.contains("..") else { return }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        process.arguments = ["bootout", "gui/\(getuid())/\(label)"]
         // A plist that was never loaded makes launchctl complain; that is
         // expected and not worth a line in anyone's console.
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        try? process.run()
-        process.waitUntilExit()
+        _ = Shell.run("/bin/launchctl", ["bootout", "gui/\(getuid())/\(label)"],
+                      maxOutputBytes: 0)
     }
 
     // MARK: - Installed apps oracle

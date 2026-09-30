@@ -1011,16 +1011,17 @@ enum BlackHoleGlyph {
     /// Keeps a recognizable presence if the bundled asset is ever missing
     /// (e.g. running the bare binary from build/).
     private static func fallback(active: Bool) -> NSImage? {
-        if let symbol = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: AppInfo.name)?
-            .withSymbolConfiguration(.init(pointSize: 13, weight: active ? .bold : .regular)) {
-            symbol.isTemplate = true
+        if let symbol = fixedSizeSymbol(named: "circle.fill") {
             return symbol
         }
         // Guaranteed last resort: draw a filled circle so the button always has a
         // visible, clickable image and can never become a zero-width, invisible item.
-        let drawn = NSImage(size: NSSize(width: 14, height: 14), flipped: false) { rect in
+        let drawn = NSImage(size: pointSize, flipped: false) { rect in
             NSColor.black.setFill()
-            NSBezierPath(ovalIn: rect.insetBy(dx: 2, dy: 2)).fill()
+            let diameter: CGFloat = 14
+            NSBezierPath(ovalIn: NSRect(x: rect.midX - diameter / 2,
+                                      y: rect.midY - diameter / 2,
+                                      width: diameter, height: diameter)).fill()
             return true
         }
         drawn.isTemplate = true

@@ -40,6 +40,25 @@ def availability_declaration(path, prefix):
 
 def main():
     OUTPUT.mkdir(parents=True, exist_ok=True)
+    fan = "Sources/Vorssaint/Services/FanControl/FanControlService.swift"
+    bodies = "".join(declaration(fan, prefix).replace("private func", "func", 1) for prefix in [
+        "    func syncWithPreferences()", "    private func startTimerIfNeeded()",
+        "    private func send(replyTimeout:"])
+    bodies = (bodies.replace("UserDefaults.standard", "defaults")
+              .replace("AppFeature.fanControl.isAvailable", "available")
+              .replace("NSXPCConnection", "Connection")
+              .replace("FanControlService.statusReplyTimeout", "0.05"))
+    write("FanControlLifecycle.swift", "import Foundation\nextension FanControlLifecycleTests {\n"
+          + "final class Service: State {\n" + bodies + "}\n}\n")
+    finder = "Sources/Vorssaint/Services/Finder/FinderCutPaste.swift"
+    cut_bodies = "".join(declaration(finder, prefix).replace("private func", "func", 1) for prefix in [
+        "    private func applyCut(", "    func clearMarks()", "    func cancelPendingCut()",
+        "    private func resetCutState("])
+    cut_bodies = (cut_bodies.replace("GeneralPasteboardAccess.shared", "lane")
+                  .replace("NSPasteboard.general", "self.pasteboard"))
+    write("FinderPasteboardLifecycle.swift", "import Foundation\nimport AppKit\n"
+          + "extension FinderPasteboardLifecycleTests {\nfinal class Service: State {\n"
+          + cut_bodies + "}\n}\n")
     panel = "Sources/Vorssaint/App/AppDelegate.swift"
     write("MenuPanelRecovery.swift", "import AppKit\nimport Foundation\n"
           + "extension MenuPanelRecoveryTests {\nfinal class Host: Fixture {\n"
@@ -459,6 +478,11 @@ def main():
           + "func display(_ item: QuickLauncherItem) -> (String, Bool) { (icon(for: item), isActive(item)) }\n}\n}\n")
 
     preview = "Sources/Vorssaint/Services/QuickTools/ScreenshotQuickPreviewController.swift"
+    write("ScreenshotPreviewActions.swift", "import Foundation\n"
+          + "extension ScreenshotPreviewActionTests {\nfinal class Controller: State {\n"
+          + declaration(preview, "    private func runDefaultAction(").replace("private func", "func", 1)
+          + declaration(preview, "    private func perform(_ requested:").replace("private func", "func", 1)
+          + "}\n}\n")
     selection = "Sources/Vorssaint/Services/QuickTools/ScreenshotSelectionController.swift"
     refresh_methods = [
         "    private func screenCaptureToolDidChange()",

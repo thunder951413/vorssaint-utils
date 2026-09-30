@@ -317,12 +317,11 @@ struct URLCleanerSettings: View {
     /// clipboard services on AppKit's pasteboard cache and hang the button
     /// (and with it the app) on a promised flavour nobody renders any more.
     private func paste() {
-        GeneralPasteboardAccess.shared.async({
-            NSPasteboard.general.string(forType: .string) ?? ""
-        }, then: { pasted in
+        GeneralPasteboardAccess.shared.readString { pasted in
+            guard let pasted else { NSSound.beep(); return }
             self.input = pasted
             self.clean()
-        })
+        }
     }
 
     private func clean() {

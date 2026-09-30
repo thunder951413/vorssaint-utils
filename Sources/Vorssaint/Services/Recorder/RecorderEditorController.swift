@@ -1513,17 +1513,17 @@ final class RecorderEditorController: NSObject, NSWindowDelegate {
         }
         run(.video, to: destination, rememberDestination: false) { [weak self] url in
             guard let self else { return }
-            let pasteboard = NSPasteboard.general
-            pasteboard.clearContents()
-            guard pasteboard.writeObjects([url as NSURL]) else {
-                NSSound.beep()
-                QuickToolHUD.show(icon: "record.circle", message: self.strings.exportFailed)
-                return
-            }
-            QuickToolHUD.show(icon: "doc.on.doc", message: self.strings.copiedHUD)
-            if deletesRecording {
-                self.confirmedClose = true
-                self.window?.close()
+            Task { @MainActor in
+                guard await GeneralPasteboardAccess.shared.writeObjects([url as NSURL]) else {
+                    NSSound.beep()
+                    QuickToolHUD.show(icon: "record.circle", message: self.strings.exportFailed)
+                    return
+                }
+                QuickToolHUD.show(icon: "doc.on.doc", message: self.strings.copiedHUD)
+                if deletesRecording {
+                    self.confirmedClose = true
+                    self.window?.close()
+                }
             }
         }
     }

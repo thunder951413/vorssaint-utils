@@ -90,6 +90,13 @@ legacy_identity_installed() {
     return $signed
 }
 
+apple_development_identity() {
+    security find-identity -v -p codesigning 2>/dev/null \
+        | grep 'Apple Development:' \
+        | head -1 \
+        | sed -E 's/.*"(.*)".*/\1/' || true
+}
+
 # Any build that lands in /Applications needs a stable signature, not just the
 # Developer one: macOS ties Accessibility and Screen Recording grants to the
 # exact binary hash, so an ad-hoc rebuild orphans them while System Settings
@@ -100,7 +107,7 @@ legacy_identity_installed() {
 # offline and idempotent. Gating on the install rather than the variant keeps
 # this off CI, where neither ci.yml nor release.yml passes --install.
 if (( DEV || INSTALL )) && [[ -z "$(developer_id_identity)" ]] \
-    && ! legacy_identity_installed; then
+    && [[ -z "$(apple_development_identity)" ]] && ! legacy_identity_installed; then
     echo "▸ No signing identity installed; creating the stable local one…"
     if ! ./Tools/setup-signing.sh; then
         echo "  ⚠ Tools/setup-signing.sh failed; signing ad-hoc instead." >&2
@@ -111,12 +118,6 @@ if (( DEV || INSTALL )) && [[ -z "$(developer_id_identity)" ]] \
     fi
 fi
 
-apple_development_identity() {
-    security find-identity -v -p codesigning 2>/dev/null \
-        | grep 'Apple Development:' \
-        | head -1 \
-        | sed -E 's/.*"(.*)".*/\1/' || true
-}
 
 codesign_with_timestamp_retry() {
     local attempt
@@ -173,7 +174,7 @@ finalize_installed_bundle_after_child() {
             --options runtime --timestamp --identifier "$NOW_PLAYING_ADAPTER_ID" --sign "$devid" "$adapter"
         codesign_with_timestamp_retry --force --strip-disallowed-xattrs --options runtime --timestamp \
             --entitlements "$ENTITLEMENTS" --sign "$devid" "$bundle"
-    elif legacy_identity_installed; then
+    elif [[ -z "$appledev" ]] && legacy_identity_installed; then
         [[ -f "$helper" ]] && /usr/bin/codesign --force --strip-disallowed-xattrs \
             --identifier "$FAN_HELPER_ID" --sign "$LEGACY_IDENTITY" "$helper"
         [[ -f "$adapter" ]] && /usr/bin/codesign --force --strip-disallowed-xattrs \
@@ -334,6 +335,7 @@ if (( TEST )); then
         Sources/Vorssaint/Core/PermissionGuideStrings.swift
         Sources/Vorssaint/Core/FanControlStrings.swift
         Sources/Vorssaint/Services/FanControl/FanControlSupport.swift
+        Sources/Vorssaint/Services/FanControl/FanControlXPC.swift
         Sources/Vorssaint/Services/Snippets/TextSnippetSupport.swift
         Sources/Vorssaint/Services/RadialMenu/RadialMenuSupport.swift
         Sources/Vorssaint/Services/QuickTools/ScratchpadSupport.swift
@@ -652,10 +654,12 @@ xattr -c -r "$STAGE" 2>/dev/null || true
 #      notarization), the app's entitlements and a secure timestamp. Gives a
 #      stable, team-based designated requirement, so permissions persist across
 #      updates AND Gatekeeper shows no "unverified developer" warning.
-#   2. "Vorssaint Utils Signing" — the legacy stable self-signed identity, kept
+#   2. Apple Development — a stable Apple-issued identity for local builds.
+#   3. "Vorssaint Utils Signing" — the legacy stable self-signed identity, kept
 #      as a fallback so contributors without a Developer ID still get a constant
 #      designated requirement across their local builds.
-#   3. Ad-hoc — fresh clone with no identity at all.
+#   4. Ad-hoc — fresh clone with no identity at all; privileged fan control
+#      stays unavailable until a certificate-backed identity is configured.
 DEVID="$(developer_id_identity)"
 APPLEDEV="$(apple_development_identity)"
 codesign_app() {
@@ -663,7 +667,7 @@ codesign_app() {
     if [[ -n "$DEVID" ]]; then
         codesign_with_timestamp_retry --force --strip-disallowed-xattrs --options runtime --timestamp \
             --entitlements "$ENTITLEMENTS" --sign "$DEVID" "$target"
-    elif legacy_identity_installed; then
+    elif [[ -z "$APPLEDEV" ]] && legacy_identity_installed; then
         codesign --force --strip-disallowed-xattrs --sign "$LEGACY_IDENTITY" "$target"
     elif [[ -n "$APPLEDEV" ]]; then
         codesign_with_timestamp_retry --force --strip-disallowed-xattrs --options runtime --timestamp \
@@ -678,7 +682,7 @@ codesign_fan_helper() {
     if [[ -n "$DEVID" ]]; then
         codesign_with_timestamp_retry --force --strip-disallowed-xattrs --options runtime --timestamp \
             --identifier "$FAN_HELPER_ID" --sign "$DEVID" "$target"
-    elif legacy_identity_installed; then
+    elif [[ -z "$APPLEDEV" ]] && legacy_identity_installed; then
         codesign --force --strip-disallowed-xattrs --identifier "$FAN_HELPER_ID" \
             --sign "$LEGACY_IDENTITY" "$target"
     elif [[ -n "$APPLEDEV" ]]; then
@@ -694,9 +698,12 @@ codesign_now_playing_adapter() {
     if [[ -n "$DEVID" ]]; then
         codesign_with_timestamp_retry --force --strip-disallowed-xattrs --options runtime --timestamp \
             --identifier "$NOW_PLAYING_ADAPTER_ID" --sign "$DEVID" "$target"
-    elif legacy_identity_installed; then
+    elif [[ -z "$APPLEDEV" ]] && legacy_identity_installed; then
         codesign --force --strip-disallowed-xattrs --identifier "$NOW_PLAYING_ADAPTER_ID" \
             --sign "$LEGACY_IDENTITY" "$target"
+    elif [[ -n "$APPLEDEV" ]]; then
+        codesign_with_timestamp_retry --force --strip-disallowed-xattrs --options runtime --timestamp \
+            --identifier "$NOW_PLAYING_ADAPTER_ID" --sign "$APPLEDEV" "$target"
     else
         codesign --force --strip-disallowed-xattrs --identifier "$NOW_PLAYING_ADAPTER_ID" --sign - "$target"
     fi
@@ -710,7 +717,7 @@ sign_bundle() {
 
     if [[ -n "$DEVID" ]]; then
         echo "  signing with Developer ID (hardened runtime): $DEVID"
-    elif legacy_identity_installed; then
+    elif [[ -z "$APPLEDEV" ]] && legacy_identity_installed; then
         echo "  signing with legacy self-signed identity: $LEGACY_IDENTITY"
     elif [[ -n "$APPLEDEV" ]]; then
         echo "  signing with Apple Development (hardened runtime): $APPLEDEV"

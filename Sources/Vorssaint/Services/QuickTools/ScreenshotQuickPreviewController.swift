@@ -33,7 +33,8 @@ final class ScreenshotQuickPreviewController {
     /// Runs one action and reports which sub-actions actually happened —
     /// save-and-copy can succeed by halves, and only the done halves gray
     /// their buttons out. Empty means the action failed entirely.
-    private let action: (Action) -> Set<Action>
+    private var performingAction = false
+    private let action: (Action) async -> Set<Action>
     private let share: (ScreenshotShareDuration,
                         @escaping (ScreenshotShareRecord?) -> Void) -> Void
     private let onClose: () -> Void
@@ -56,7 +57,7 @@ final class ScreenshotQuickPreviewController {
     init(capture: ScreenshotSelectionController.Capture,
          strings: ScreenshotFeatureStrings,
          defaultAction: ScreenshotDefaultAction,
-         action: @escaping (Action) -> Set<Action>,
+         action: @escaping (Action) async -> Set<Action>,
          share: @escaping (ScreenshotShareDuration,
                            @escaping (ScreenshotShareRecord?) -> Void) -> Void,
          onClose: @escaping () -> Void) {
@@ -144,7 +145,13 @@ final class ScreenshotQuickPreviewController {
     private func finishShowing() {
         if !didRunDefaultAction {
             didRunDefaultAction = true
-            autoDismissDuration = runDefaultAction(defaultAction) ? 3 : 12
+            performingAction = true
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.autoDismissDuration = await self.runDefaultAction(self.defaultAction) ? 3 : 12
+                self.performingAction = false
+                if !self.closed { self.scheduleAutoDismiss() }
+            }
             scanForQR()
         }
         scheduleAutoDismiss()
@@ -164,7 +171,7 @@ final class ScreenshotQuickPreviewController {
     /// stays up as confirmation, and the person can still edit or discard
     /// from it. Edit never reaches here, the service routes it straight
     /// into the editor without a preview.
-    private func runDefaultAction(_ defaultAction: ScreenshotDefaultAction) -> Bool {
+    private func runDefaultAction(_ defaultAction: ScreenshotDefaultAction) async -> Bool {
         let mapped: Action
         switch defaultAction {
         case .none, .edit: return false
@@ -172,7 +179,7 @@ final class ScreenshotQuickPreviewController {
         case .saveAndCopy: mapped = .saveAndCopy
         case .copy: mapped = .copy
         }
-        let performed = action(mapped)
+        let performed = await action(mapped)
         guard !performed.isEmpty else { return false }
         model.disabledActions = performed.intersection([.save, .copy])
         return true
@@ -247,11 +254,15 @@ final class ScreenshotQuickPreviewController {
         guard !model.disabledActions.contains(requested) else { return }
         dismissWork?.cancel()
         dismissWork = nil
-        guard !action(requested).isEmpty else {
-            scheduleAutoDismiss()
-            return
+        guard !performingAction else { return }
+        performingAction = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let performed = await self.action(requested)
+            self.performingAction = false
+            guard !self.closed else { return }
+            if performed.isEmpty { self.scheduleAutoDismiss() } else { self.close() }
         }
-        close()
     }
 
     private func performShare(_ duration: ScreenshotShareDuration) {
@@ -288,7 +299,7 @@ final class ScreenshotQuickPreviewController {
         dismissWork = nil
         Task { @MainActor [weak self] in
             guard let self, !self.closed else { return }
-            if ScreenshotShareService.shared.copy(record.url) {
+            if await ScreenshotShareService.shared.copy(record.url) {
                 QuickToolHUD.show(icon: "link", message: self.strings.sharedHUD)
             } else {
                 NSSound.beep()
@@ -366,6 +377,7 @@ final class ScreenshotQuickPreviewController {
     }
 
     private func scheduleAutoDismiss() {
+        guard !performingAction else { return }
         guard !closed, !pointerInside, !model.sharing, !model.deletingShare else { return }
         dismissWork?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.close() }

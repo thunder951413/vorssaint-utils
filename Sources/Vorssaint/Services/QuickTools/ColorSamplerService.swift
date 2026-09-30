@@ -53,19 +53,18 @@ final class ColorSamplerService: ObservableObject {
     /// Copies without the HUD. The capture surface calls this while its
     /// shielding-level panels are still up, where the HUD would be invisible,
     /// and shows its own confirmation instead.
-    @discardableResult
-    func copyQuietly(_ color: NSColor) -> String? {
-        guard let value = formattedValue(color) else { return nil }
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(value, forType: .string)
-        return value
+    func copyQuietly(_ color: NSColor, completion: @escaping (String?) -> Void) {
+        guard let value = formattedValue(color) else { completion(nil); return }
+        GeneralPasteboardAccess.shared.copyString(value) { succeeded in
+            completion(succeeded ? value : nil)
+        }
     }
 
     private func copy(_ color: NSColor) {
-        guard let srgb = color.usingColorSpace(.sRGB),
-              let value = copyQuietly(color)
-        else { return }
-        QuickToolHUD.show(icon: "eyedropper", message: value, swatch: srgb)
+        guard let srgb = color.usingColorSpace(.sRGB) else { return }
+        copyQuietly(color) { value in
+            guard let value else { NSSound.beep(); return }
+            QuickToolHUD.show(icon: "eyedropper", message: value, swatch: srgb)
+        }
     }
 }

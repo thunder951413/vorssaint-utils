@@ -71,12 +71,10 @@ enum AdminShell {
             // established bound without rushing a prompt that is being read.
             return Shell.run("/usr/bin/osascript", ["-e", source], timeout: 600).status == 0
         case .signedApp:
-            // NSAppleScript is main-thread-only. The updater's elevated shell
-            // detaches immediately after approval, so this wait covers only the
-            // system authorization interaction.
-            return DispatchQueue.main.sync {
-                AppleScriptRunner.run(source).ok
-            }
+            // AppleScript and NSAppleScript support background execution since
+            // macOS 10.6. Keep the authorization wait off the app's main queue;
+            // the engine dispatches thread-unsafe scripting additions itself.
+            return AppleScriptRunner.run(source).ok
         }
     }
 
@@ -210,6 +208,8 @@ enum Sudoers {
 /// per-target Automation permission the features already required; nothing new is
 /// requested. Call these OFF the main thread, so a slow target never blocks the
 /// UI or the event taps (the calls block their thread until the target replies).
+/// Each call owns its script; never share a mutable script across threads.
+/// https://developer.apple.com/library/archive/releasenotes/AppleScript/RN-AppleScript/RN-10_6/RN-10_6.html
 enum AppleScriptRunner {
     /// True when this app may script `bundleID`. Undetermined → shows the system
     /// prompt (attributed to this app); granted → returns at once; denied →

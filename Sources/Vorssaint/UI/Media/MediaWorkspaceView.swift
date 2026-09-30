@@ -1715,9 +1715,7 @@ struct MediaWorkspaceView: View {
     }
 
     private func copy(_ text: String) {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
+        GeneralPasteboardAccess.shared.copyString(text)
     }
 
     /// A size target is typed rather than stepped, so the formatter is what

@@ -434,13 +434,13 @@ final class ScreenshotService: ObservableObject {
                     self.openEditor(with: capture)
                     return [.edit]
                 case .copy:
-                    return self.copyDirect(capture) ? [.copy] : []
+                    return await self.copyDirect(capture) ? [.copy] : []
                 case .save:
                     guard let outcome = self.saveDirect(capture) else { return [] }
                     saved = outcome
                     return [.save]
                 case .saveAndCopy:
-                    guard let result = self.saveAndCopyDirect(capture) else { return [] }
+                    guard let result = await self.saveAndCopyDirect(capture) else { return [] }
                     saved = result.outcome
                     return result.copied ? [.save, .copy] : [.save]
                 case .discard:
@@ -559,8 +559,10 @@ final class ScreenshotService: ObservableObject {
         autoCopyTask?.cancel()
         autoCopyGeneration += 1
         let generation = autoCopyGeneration
-        let pasteboardChangeCount = NSPasteboard.general.changeCount
         autoCopyTask = Task { @MainActor [weak self] in
+            guard let pasteboardChangeCount: Int = await GeneralPasteboardAccess.shared.perform({ _ in
+                NSPasteboard.general.changeCount
+            }), !Task.isCancelled else { return }
             let output = await Task.detached(priority: .userInitiated) {
                 guard let export = Self.flatten(capture, downscaleTo1x: downscale) else {
                     return nil as (URL, ScreenshotEditorController.ClipboardPayload)?
@@ -577,16 +579,15 @@ final class ScreenshotService: ObservableObject {
             }
             guard let self, !Task.isCancelled,
                   generation == self.autoCopyGeneration,
-                  pasteboardChangeCount == NSPasteboard.general.changeCount,
                   AppFeature.screenshot.isAvailable
             else {
                 try? FileManager.default.removeItem(at: output.0)
                 return
             }
-            guard ScreenshotEditorController.copyFile(output.0, payload: output.1)
+            guard await ScreenshotEditorController.copyFile(output.0, payload: output.1,
+                                                            expectedChangeCount: pasteboardChangeCount)
             else {
-                try? FileManager.default.removeItem(at: output.0)
-                NSSound.beep()
+                if !Task.isCancelled { NSSound.beep() }
                 return
             }
             ScreenshotSupport.pruneCopiedFiles(in: folder, preserving: output.0)
@@ -627,9 +628,9 @@ final class ScreenshotService: ObservableObject {
     }
 
     @discardableResult
-    private func copyDirect(_ capture: ScreenshotSelectionController.Capture) -> Bool {
+    private func copyDirect(_ capture: ScreenshotSelectionController.Capture) async -> Bool {
         guard let export = flatten(capture) else { return false }
-        guard ScreenshotEditorController.copyImage(
+        guard await ScreenshotEditorController.copyImage(
             export, fileNamePrefix: strings.fileNamePrefix) else {
             NSSound.beep()
             return false
@@ -662,7 +663,7 @@ final class ScreenshotService: ObservableObject {
     /// the HUD keeps the plain saved message, so the caller leaves the Copy
     /// button available instead of claiming work that never happened.
     private func saveAndCopyDirect(_ capture: ScreenshotSelectionController.Capture)
-        -> (outcome: SaveOutcome, copied: Bool)? {
+        async -> (outcome: SaveOutcome, copied: Bool)? {
         guard let export = flatten(capture),
               let data = ScreenshotRenderer.pngData(from: export.image, scale: export.scale)
         else { return nil }
@@ -677,7 +678,7 @@ final class ScreenshotService: ObservableObject {
             return nil
         }
 
-        let copied = ScreenshotEditorController.copyFile(
+        let copied = await ScreenshotEditorController.copyFile(
             url, payload: ScreenshotEditorController.clipboardPayload(from: export, png: data))
         let format = copied ? strings.savedAndCopiedHUDFormat : strings.savedHUDFormat
         QuickToolHUD.show(icon: "camera.viewfinder",

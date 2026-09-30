@@ -28,6 +28,7 @@ final class TextSnippetService {
     private var activationObserver: NSObjectProtocol?
     private let inputLock = NSLock()
     private var buffer = ""
+    private var inputRevision = 0
     private var libraryVisible = false
     private var commandBarVisible = false
     /// Registered once when the preferences change, so no expansion pays
@@ -42,6 +43,7 @@ final class TextSnippetService {
     }
 
     var isRunning: Bool { tapLifecycleLock.withLock { tap != nil } }
+    var inputGeneration: Int { inputLock.withLock { inputRevision } }
 
     func syncWithPreferences() {
         let enabled = AppFeature.textSnippets.isAvailable
@@ -107,14 +109,14 @@ final class TextSnippetService {
     func setLibraryVisible(_ visible: Bool) {
         inputLock.withLock {
             libraryVisible = visible
-            if visible { buffer = "" }
+            if visible { buffer = ""; inputRevision &+= 1 }
         }
     }
 
     func setCommandBarVisible(_ visible: Bool) {
         inputLock.withLock {
             commandBarVisible = visible
-            if visible { buffer = "" }
+            if visible { buffer = ""; inputRevision &+= 1 }
         }
     }
 
@@ -259,7 +261,7 @@ final class TextSnippetService {
     }
 
     private func resetBuffer() {
-        inputLock.withLock { buffer = "" }
+        inputLock.withLock { buffer = ""; inputRevision &+= 1 }
     }
 
     // MARK: - Tap
@@ -288,6 +290,7 @@ final class TextSnippetService {
         guard event.getIntegerValueField(.eventSourceUserData) != Self.syntheticMarker else {
             return Unmanaged.passUnretained(event)
         }
+        inputLock.withLock { inputRevision &+= 1 }
         // Password fields: the system enables secure input; typing there must
         // stay exactly as typed, and the buffer must not remember any of it.
         guard !IsSecureEventInputEnabled() else {
@@ -344,7 +347,8 @@ final class TextSnippetService {
                               trailingKeyCode: CGKeyCode(keyCode),
                               trailingFlags: event.flags,
                               trailingText: typed,
-                              failureKeyCode: CGKeyCode(keyCode))
+                              failureKeyCode: CGKeyCode(keyCode),
+                              passedTextCount: typed.count)
                     ? nil
                     : Unmanaged.passUnretained(event)
             }
@@ -368,7 +372,8 @@ final class TextSnippetService {
                           trailingFlags: [],
                           trailingText: "",
                           failureKeyCode: CGKeyCode(keyCode),
-                          failureFlags: event.flags)
+                          failureFlags: event.flags,
+                          passedTextCount: typed.count)
                 ? nil
                 : Unmanaged.passUnretained(event)
         }
@@ -384,20 +389,35 @@ final class TextSnippetService {
                         trailingFlags: CGEventFlags,
                         trailingText: String,
                         failureKeyCode: CGKeyCode?,
-                        failureFlags: CGEventFlags = []) -> Bool {
+                        failureFlags: CGEventFlags = [],
+                        passedTextCount: Int = 1) -> Bool {
         let didExpand = expansionSoundCue()
+        if TextSnippetSupport.needsClipboard(snippet.replacement) {
+            let revision = inputLock.withLock { inputRevision }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                let targetPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+                GeneralPasteboardAccess.shared.readString { [weak self] clipboard in
+                    guard let self, let clipboard,
+                          self.inputLock.withLock({ self.inputRevision == revision }),
+                          NSWorkspace.shared.frontmostApplication?.processIdentifier == targetPID,
+                          AXIsProcessTrusted(), !IsSecureEventInputEnabled() else { return }
+                    let text = TextSnippetSupport.expand(snippet.replacement, date: Date(), clipboard: clipboard)
+                    _ = Self.postExpansion(deleteCount: deleteCount + passedTextCount,
+                                           text: text, trailingKeyCode: trailingKeyCode,
+                                           trailingFlags: trailingFlags, trailingText: trailingText,
+                                           didExpand: didExpand)
+                }
+            }
+            // Let this event through. On expiry or subsequent input the
+            // original trigger stays untouched, with no missing delimiter.
+            return false
+        }
         let post = { () -> Bool in
-            // Variable expansion is decided while the triggering event still
-            // belongs to this callback. Only an explicit clipboard variable
-            // pays for a synchronous read; the multiline write itself runs on
-            // the shared pasteboard lane.
-            let clipboard = TextSnippetSupport.needsClipboard(snippet.replacement)
-                ? NSPasteboard.general.string(forType: .string)
-                : nil
             let text = TextSnippetSupport.expand(
                 snippet.replacement,
                 date: Date(),
-                clipboard: clipboard
+                clipboard: nil
             )
             return Self.postExpansion(deleteCount: deleteCount,
                                       text: text,

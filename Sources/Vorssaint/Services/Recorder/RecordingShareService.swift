@@ -158,10 +158,12 @@ final class RecordingShareService: ObservableObject {
     }
 
     @discardableResult
-    func copy(_ url: URL) -> Bool {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        return pasteboard.setString(url.absoluteString, forType: .string)
+    func copy(_ url: URL) async -> Bool {
+        await withCheckedContinuation { continuation in
+            GeneralPasteboardAccess.shared.copyString(url.absoluteString) {
+                continuation.resume(returning: $0)
+            }
+        }
     }
 
     private func deleteRemote(_ record: RecordingShareRecord) async throws {

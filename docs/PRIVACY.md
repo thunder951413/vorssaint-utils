@@ -69,6 +69,8 @@ Feedback is delivered to private support channels visible to the service owner. 
 
 8. **Online lyrics, only after you enable the separate lookup option.** While the lyrics view is open, a lookup sends the current song's title, artist, album and duration over HTTPS to `lrclib.net`. Audio, artwork, local paths, accounts and listening history are not included. The provider receives ordinary request data, including your public IP address, under its own policies. Requests use an ephemeral session without stored cookies, reject redirects and stop when you hide the view or disable lookup. Lyrics are kept only in memory for the current song. Local lyric import works without this connection.
 
+9. **Website icons, only when you request one for a radial menu link.** The app fetches `/favicon.ico` from the link's HTTP or HTTPS origin. The request omits the link's username, password, path, query and fragment. The website receives ordinary request data, including your public IP address; an HTTP link uses an unencrypted connection. Requests use an ephemeral session, have a five-second deadline and a bounded response size. The resulting icon is saved locally for the menu.
+
 That is the entire list. There are no hidden beacons or background uploads.
 
 ## Changes to this document

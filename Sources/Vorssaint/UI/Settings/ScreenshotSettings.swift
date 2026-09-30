@@ -540,7 +540,9 @@ private struct ScreenshotSharedLinksView: View {
     }
 
     private func copy(_ url: URL) {
-        sharing.copy(url)
+        Task { @MainActor in
+            if await !sharing.copy(url) { NSSound.beep() }
+        }
     }
 
     private func delete(_ record: ScreenshotShareRecord) {

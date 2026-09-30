@@ -422,20 +422,12 @@ final class DiskImageInstallerService {
     }
 
     private static func run(_ executable: String, arguments: [String]) -> CommandResult {
-        let process = Process()
-        let output = Pipe()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = arguments
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-        } catch {
-            return CommandResult(status: -1, output: Data())
-        }
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        return CommandResult(status: process.terminationStatus, output: data)
+        // Detaching a busy image and assessing a large app can take longer
+        // than a probe, but neither may strand the installer indefinitely.
+        let result = BoundedProcessRunner.run(executable, arguments,
+                                              timeout: 120,
+                                              maxOutputBytes: 4 * 1024 * 1024)
+        return CommandResult(status: result.status, output: result.output)
     }
 }
 

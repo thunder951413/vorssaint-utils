@@ -66,6 +66,11 @@ final class FanControlService: ObservableObject {
         if AppFeature.fanControl.isAvailable {
             if UserDefaults.standard.bool(forKey: DefaultsKey.fanControlRecoveryNeeded) {
                 restoreAutomatic()
+            } else if isCurveArmed {
+                refreshLocalProbe()
+                startTimerIfNeeded()
+            } else {
+                stopIdleWorkIfPossible()
             }
         } else {
             setCurveArmed(false)
@@ -179,9 +184,8 @@ final class FanControlService: ObservableObject {
         send(replyTimeout: Self.controlReplyTimeout) { proxy, reply in
             proxy.applyConfiguration(encodedConfiguration, withReply: reply)
         } completion: { response in
-            let matches = self.finishRequest(generation)
+            guard self.finishRequest(generation) else { return }
             if userInitiated { self.isWorking = false }
-            guard matches else { return }
             guard let response else {
                 self.markHelperUnreachable(.helperUnavailable)
                 return
@@ -377,25 +381,26 @@ final class FanControlService: ObservableObject {
                       _ operation: @escaping (FanControlXPCProtocol, @escaping (Data) -> Void) -> Void,
                       completion: @escaping (FanControlResponse?) -> Void) {
         var finished = false
-        let finish: (FanControlResponse?) -> Void = { response in
+        var timeoutWorkItem: DispatchWorkItem?
+        let finish: (FanControlResponse?, NSXPCConnection?) -> Void = { [weak self] response, failedConnection in
             DispatchQueue.main.async {
                 guard !finished else { return }
                 finished = true
-                completion(response)
-            }
-        }
-        var timeoutWorkItem: DispatchWorkItem?
-        guard let remote = proxy(errorHandler: { [weak self] failedConnection in
-            timeoutWorkItem?.cancel()
-            DispatchQueue.main.async {
-                if self?.connection === failedConnection {
+                timeoutWorkItem?.cancel()
+                timeoutWorkItem = nil
+                // Tear down before calling user code: completion can issue a
+                // new request, which must get a fresh usable connection.
+                if let failedConnection, self?.connection === failedConnection {
                     failedConnection.invalidate()
                     self?.connection = nil
                 }
-                finish(nil)
+                completion(response)
             }
+        }
+        guard let remote = proxy(errorHandler: { failedConnection in
+            finish(nil, failedConnection)
         }) else {
-            finish(nil)
+            finish(nil, nil)
             return
         }
         // Whichever of the reply, the error handler or the timeout claims the
@@ -403,26 +408,17 @@ final class FanControlService: ObservableObject {
         // late timeout can never tear down a connection a newer request,
         // sharing the same connection, still has in flight.
         let sentConnection = remote.connection
-        let timeout = DispatchWorkItem { [weak self] in
-            DispatchQueue.main.async {
-                guard !finished else { return }
-                finished = true
-                completion(nil)
-                guard self?.connection === sentConnection else { return }
-                sentConnection.invalidate()
-                self?.connection = nil
-            }
-        }
+        let timeout = DispatchWorkItem { finish(nil, sentConnection) }
         timeoutWorkItem = timeout
         DispatchQueue.main.asyncAfter(deadline: .now() + replyTimeout, execute: timeout)
         operation(remote.proxy) { data in
-            timeout.cancel()
-            finish(FanControlIPC.decode(data))
+            finish(FanControlIPC.decode(data), nil)
         }
     }
 
     private func proxy(errorHandler: @escaping (NSXPCConnection) -> Void)
         -> (proxy: FanControlXPCProtocol, connection: NSXPCConnection)? {
+        guard FanControlIdentifiers.hasTrustedSignature else { return nil }
         if connection == nil {
             let connection = NSXPCConnection(machServiceName: FanControlIdentifiers.helperID,
                                              options: .privileged)
@@ -511,6 +507,10 @@ final class FanControlService: ObservableObject {
     // MARK: - Registration and local reads
 
     private func refreshAccessState() {
+        guard FanControlIdentifiers.hasTrustedSignature else {
+            accessState = .unavailable
+            return
+        }
         switch Self.appService.status {
         case .notRegistered: accessState = .notRegistered
         case .enabled: accessState = .enabled
@@ -703,7 +703,7 @@ final class FanControlService: ObservableObject {
                 || UserDefaults.standard.bool(forKey: DefaultsKey.fanControlRecoveryNeeded) else { return }
         startObservingSystemState()
         guard timer == nil else { return }
-        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
             guard let self else { return }
             if self.snapshot.isCooling {
                 self.heartbeat()
@@ -716,6 +716,9 @@ final class FanControlService: ObservableObject {
             }
             self.tryTakeOverIfNeeded()
         }
+        timer.tolerance = 0.1
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
     }
 
     private func tryTakeOverIfNeeded() {
@@ -740,11 +743,6 @@ final class FanControlService: ObservableObject {
         case .belowThreshold, .unavailable:
             break
         }
-        // The helper drops cooling once a heartbeat is `heartbeatLimit` seconds
-        // old, so a second's cadence has six to spare; matching the leeway the
-        // helper's own watchdog already takes lets these wakes coalesce with
-        // everything else on the run loop instead of standing alone.
-        timer?.tolerance = 0.1
     }
 
     private func stopIdleWorkIfPossible() {

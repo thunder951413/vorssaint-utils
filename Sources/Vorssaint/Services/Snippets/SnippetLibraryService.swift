@@ -166,17 +166,23 @@ final class SnippetLibraryService: ObservableObject {
             }
             return
         }
-        let clipboard = TextSnippetSupport.needsClipboard(snippet.replacement)
-            ? NSPasteboard.general.string(forType: .string)
-            : nil
-        let text = TextSnippetSupport.expand(snippet.replacement,
-                                             date: Date(),
-                                             clipboard: clipboard)
-        // A beat for the panel to leave the screen; the target app kept focus
-        // (the panel never activates), so the caret is exactly where the user
-        // left it.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-            self?.postWhenModifiersReleased(text: text, attempt: 0)
+        let targetPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let inputGeneration = TextSnippetService.shared.inputGeneration
+        let insertText: (String?) -> Void = { [weak self] clipboard in
+            let text = TextSnippetSupport.expand(snippet.replacement, date: Date(), clipboard: clipboard)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                guard NSWorkspace.shared.frontmostApplication?.processIdentifier == targetPID else { return }
+                guard TextSnippetService.shared.inputGeneration == inputGeneration else { return }
+                self?.postWhenModifiersReleased(text: text, attempt: 0)
+            }
+        }
+        if TextSnippetSupport.needsClipboard(snippet.replacement) {
+            GeneralPasteboardAccess.shared.readString { clipboard in
+                guard let clipboard else { NSSound.beep(); return }
+                insertText(clipboard)
+            }
+        } else {
+            insertText(nil)
         }
     }
 

@@ -1274,12 +1274,10 @@ enum CommandBarCatalog {
     /// held up — the lane can be wedged behind an app that promised pasteboard
     /// content and stopped answering (issue #887).
     private static func copyAnswer(_ value: String) {
-        GeneralPasteboardAccess.shared.async({
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(value, forType: .string)
-        }, then: {
+        GeneralPasteboardAccess.shared.copyString(value) { succeeded in
+            guard succeeded else { NSSound.beep(); return }
             QuickToolHUD.show(icon: "doc.on.doc", message: value)
-        })
+        }
     }
 
     // MARK: - Emoji
@@ -1403,9 +1401,10 @@ enum CommandBarCatalog {
             body("")
             return
         }
-        GeneralPasteboardAccess.shared.async({
-            NSPasteboard.general.string(forType: .string) ?? ""
-        }, then: body)
+        GeneralPasteboardAccess.shared.readString { text in
+            guard let text else { NSSound.beep(); return }
+            body(text)
+        }
     }
 
     /// Return pressed before a script's debounced run has answered yet: runs
@@ -1699,9 +1698,7 @@ enum CommandBarCatalog {
     /// main-thread read races the lane's readers and freezes the app on a
     /// promised flavour nobody is left to render (issue #887).
     private static func cleanClipboardURL() {
-        GeneralPasteboardAccess.shared.async({
-            NSPasteboard.general.string(forType: .string)
-        }, then: { raw in
+        GeneralPasteboardAccess.shared.readString { raw in
             let s = L10n.shared.s
             guard let raw,
                   !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -1723,7 +1720,7 @@ enum CommandBarCatalog {
                                   message: String(format: s.urlCleanerRemovedFormat,
                                                   names.joined(separator: ", ")))
             }
-        })
+        }
     }
 
     /// Brightness lands on the display under the pointer, the screen where

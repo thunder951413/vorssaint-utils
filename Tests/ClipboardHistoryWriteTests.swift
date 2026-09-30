@@ -79,7 +79,7 @@ struct ClipboardHistoryWriteTests {
     }
 }
 
-private final class FakeHistoryPasteboard: ClipboardHistoryPasteboard {
+final class FakeHistoryPasteboard: ClipboardHistoryPasteboard {
     var operations: [String] = []
     var rejectedOperations: Set<String> = []
     var strings: [String] = []

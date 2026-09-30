@@ -1042,18 +1042,20 @@ private final class ScreenshotOverlayView: NSView {
             viewSize: bounds.size,
             imageSize: CGSize(width: loupeImage.width, height: loupeImage.height))
         let sample = loupePixelColor(in: loupeImage, at: pixelPoint)
-        guard let color = sample.color,
-              let value = ColorSamplerService.shared.copyQuietly(color)
-        else { return }
-        copiedValue = value
-        copiedValueReset?.cancel()
-        let reset = DispatchWorkItem { [weak self] in
-            self?.copiedValue = nil
-            self?.needsDisplay = true
+        guard let color = sample.color else { return }
+        ColorSamplerService.shared.copyQuietly(color) { [weak self] value in
+            guard let self else { return }
+            guard let value else { NSSound.beep(); return }
+            self.copiedValue = value
+            self.copiedValueReset?.cancel()
+            let reset = DispatchWorkItem { [weak self] in
+                self?.copiedValue = nil
+                self?.needsDisplay = true
+            }
+            self.copiedValueReset = reset
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.4, execute: reset)
+            self.needsDisplay = true
         }
-        copiedValueReset = reset
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4, execute: reset)
-        needsDisplay = true
     }
 
     func refreshCaptureGuide() {

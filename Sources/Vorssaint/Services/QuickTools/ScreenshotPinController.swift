@@ -118,13 +118,16 @@ private final class ScreenshotPinWindow: NSPanel {
     // MARK: Actions
 
     func copyImage() {
-        guard ScreenshotEditorController.copyImage(
-            ScreenshotRenderer.Export(image: image, scale: scale),
-            fileNamePrefix: strings.fileNamePrefix) else {
-            NSSound.beep()
-            return
+        let export = ScreenshotRenderer.Export(image: image, scale: scale)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard await ScreenshotEditorController.copyImage(
+                export, fileNamePrefix: self.strings.fileNamePrefix) else {
+                NSSound.beep()
+                return
+            }
+            QuickToolHUD.show(icon: "camera.viewfinder", message: self.strings.copiedHUD)
         }
-        QuickToolHUD.show(icon: "camera.viewfinder", message: strings.copiedHUD)
     }
 
     func saveImage() {

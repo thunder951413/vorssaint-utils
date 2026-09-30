@@ -1289,17 +1289,20 @@ final class ScreenshotEditorController: NSObject, NSWindowDelegate {
     /// and the window's job is done, so nothing lingers to tidy up.
     func copyToClipboard() {
         guard let export = model.exportImage() else { return }
-        guard Self.copyImage(export, fileNamePrefix: strings.fileNamePrefix) else {
-            NSSound.beep()
-            return
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard await Self.copyImage(export, fileNamePrefix: self.strings.fileNamePrefix) else {
+                NSSound.beep()
+                return
+            }
+            self.model.markExported()
+            QuickToolHUD.show(icon: "camera.viewfinder", message: self.strings.copiedHUD)
+            self.window?.close()
         }
-        model.markExported()
-        QuickToolHUD.show(icon: "camera.viewfinder", message: strings.copiedHUD)
-        window?.close()
     }
 
     @discardableResult
-    static func copyImage(_ export: ScreenshotRenderer.Export, fileNamePrefix: String) -> Bool {
+    static func copyImage(_ export: ScreenshotRenderer.Export, fileNamePrefix: String) async -> Bool {
         guard let data = ScreenshotRenderer.pngData(from: export.image, scale: export.scale),
               let base = FileManager.default.urls(for: .cachesDirectory,
                                                   in: .userDomainMask).first,
@@ -1312,8 +1315,9 @@ final class ScreenshotEditorController: NSObject, NSWindowDelegate {
                                                          directory: folder) else {
             return false
         }
-        guard copyFile(url, payload: clipboardPayload(from: export, png: data)) else {
-            try? FileManager.default.removeItem(at: url)
+        // A timed-out AppKit write may still be in progress. Keep its backing
+        // file in the bounded cache so a recipient can finish reading it.
+        guard await copyFile(url, payload: clipboardPayload(from: export, png: data)) else {
             return false
         }
         ScreenshotSupport.pruneCopiedFiles(in: folder, preserving: url)
@@ -1321,9 +1325,8 @@ final class ScreenshotEditorController: NSObject, NSWindowDelegate {
     }
 
     @discardableResult
-    static func copyFile(_ url: URL, payload: ClipboardPayload? = nil) -> Bool {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
+    static func copyFile(_ url: URL, payload: ClipboardPayload? = nil,
+                         expectedChangeCount: Int? = nil) async -> Bool {
         let item = NSPasteboardItem()
         guard item.setString(url.absoluteString, forType: .fileURL) else { return false }
         if let png = payload?.png {
@@ -1332,7 +1335,7 @@ final class ScreenshotEditorController: NSObject, NSWindowDelegate {
         if let tiff = payload?.tiff {
             item.setData(tiff, forType: .tiff)
         }
-        return pasteboard.writeObjects([item])
+        return await GeneralPasteboardAccess.shared.writeObjects([item], expectedChangeCount: expectedChangeCount)
     }
 
     struct ClipboardPayload: Sendable {
@@ -1352,9 +1355,7 @@ final class ScreenshotEditorController: NSObject, NSWindowDelegate {
     }
 
     @discardableResult
-    static func copyClipboardPayload(_ payload: ClipboardPayload) -> Bool {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
+    static func copyClipboardPayload(_ payload: ClipboardPayload) async -> Bool {
         let item = NSPasteboardItem()
         if let png = payload.png {
             item.setData(png, forType: .png)
@@ -1362,7 +1363,7 @@ final class ScreenshotEditorController: NSObject, NSWindowDelegate {
         if let tiff = payload.tiff {
             item.setData(tiff, forType: .tiff)
         }
-        return pasteboard.writeObjects([item])
+        return await GeneralPasteboardAccess.shared.writeObjects([item])
     }
 
     func save() {
@@ -1417,10 +1418,10 @@ final class ScreenshotEditorController: NSObject, NSWindowDelegate {
     func copySelectedText() {
         let text = model.selectedText
         guard !text.isEmpty else { return }
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
-        QuickToolHUD.show(icon: "text.viewfinder", message: L10n.shared.s.ocrCopied)
+        GeneralPasteboardAccess.shared.copyString(text) { succeeded in
+            guard succeeded else { NSSound.beep(); return }
+            QuickToolHUD.show(icon: "text.viewfinder", message: L10n.shared.s.ocrCopied)
+        }
     }
 
     /// Shows the detected code's content in the shared result panel; the

@@ -605,10 +605,12 @@ private struct RecorderSharedLinkView: View {
             HStack {
                 Spacer()
                 Button {
-                    if RecordingShareService.shared.copy(record.url) {
-                        QuickToolHUD.show(icon: "link", message: strings.sharedHUD)
-                    } else {
-                        NSSound.beep()
+                    Task { @MainActor in
+                        if await RecordingShareService.shared.copy(record.url) {
+                            QuickToolHUD.show(icon: "link", message: strings.sharedHUD)
+                        } else {
+                            NSSound.beep()
+                        }
                     }
                 } label: {
                     Label(strings.copyLink, systemImage: "doc.on.doc")
