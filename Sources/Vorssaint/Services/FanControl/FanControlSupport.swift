@@ -229,6 +229,30 @@ enum FanControlPolicy {
     static let accelerationFactorStep = 0.1
     static let defaultAccelerationFactor = 1.0
     static let takeoverMarginRPM = 100.0
+    /// After taking over, a curve keeps control at least this long before it
+    /// may hand back, so sensor noise around the threshold cannot make the fans
+    /// spin up and down (or replay the stopped-fan start) every few seconds.
+    /// It only ever delays handing back, never raising the fans.
+    static let minimumCurveHoldDuration: TimeInterval = 30
+    /// Manual mode switches the firmware's own controller off, so while a curve
+    /// runs nobody knows what the system would ask for now. A check hands the
+    /// fans back, takes them again as soon as the firmware writes its own
+    /// target, and keeps control only if the curve still wants clearly more.
+    /// Checks run when the sensor has warmed since the last one (the usual
+    /// reason the system would want more), plus a slow backstop for heat the
+    /// curve's sensor does not see.
+    static let systemCheckTemperatureRise = 2.0
+    static let systemCheckBackstopInterval: TimeInterval = 180
+    static let systemCheckMinimumSpacing: TimeInterval = 20
+    /// The firmware's target is polled this often during a check, and the fans
+    /// are taken back the moment it changes, so inertia hides the handover.
+    static let systemCheckPollInterval: TimeInterval = 0.2
+    /// No change by then means the firmware wants what the fans already run.
+    static let systemCheckResponseTimeout: TimeInterval = 3
+    /// Consecutive app-side polls that must agree before a takeover is sent.
+    static let takeoverConfirmationSamples = 2
+    /// Delay before an automatic takeover is retried after the helper refused it.
+    static let takeoverRetryBackoff: TimeInterval = 30
 
     static func isAutomaticMode(_ mode: UInt8) -> Bool {
         mode == 0 || mode == 3
@@ -373,6 +397,43 @@ enum FanControlPolicy {
                                                   level: level) else { return false }
             return curveRPM >= max(fan.actualRPM, fan.targetRPM) + takeoverMarginRPM
         }
+    }
+
+    /// A curve only ever adds cooling on top of what the system was doing. Once
+    /// it asks for less than the speed the system ran when the curve took over,
+    /// the system's own controller was already doing better and gets it back.
+    static func shouldHandBack(requestedLevel: Int, floorLevel: Int) -> Bool {
+        validCoolingLevel(requestedLevel)
+            && requestedLevel < maximumCoolingLevel
+            && requestedLevel < floorLevel
+    }
+
+    static func systemCheckDue(lastCheck: TimeInterval?, controlStarted: TimeInterval?,
+                               now: TimeInterval,
+                               referenceTemperature: Double?,
+                               temperature: Double?) -> Bool {
+        guard let reference = lastCheck ?? controlStarted else { return false }
+        let elapsed = now - reference
+        guard elapsed >= systemCheckMinimumSpacing else { return false }
+        if elapsed >= systemCheckBackstopInterval { return true }
+        guard let referenceTemperature, let temperature,
+              referenceTemperature.isFinite, temperature.isFinite else { return false }
+        return temperature - referenceTemperature >= systemCheckTemperatureRise
+    }
+
+    /// Whether the firmware has written its own target since the handover:
+    /// any fan whose target moved away from what the curve had set.
+    static func firmwareResponded(previousTargets: [Double],
+                                  fans: [FanControlFanReading]) -> Bool {
+        guard previousTargets.count == fans.count, !fans.isEmpty else { return false }
+        return zip(fans, previousTargets).contains { fan, previous in
+            !targetRPMMatches(target: fan.targetRPM, expected: previous)
+        }
+    }
+
+    static func curveHoldElapsed(startedAt start: TimeInterval?, now: TimeInterval) -> Bool {
+        guard let start else { return true }
+        return now - start >= minimumCurveHoldDuration
     }
 
     static func floorCoolingLevel(fans: [FanControlFanReading]) -> Int {

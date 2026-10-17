@@ -40,6 +40,7 @@ struct FanControlSection: View {
                                   temperatureUnit: displayTemperatureUnit,
                                   authorize: service.authorize,
                                   applyConfiguration: service.applyConfiguration,
+                                  scheduleCurveReapply: service.scheduleCurveReapply,
                                   stopCooling: service.restoreAutomatic)
                 .panelCard()
                 .onAppear { service.panelDidAppear() }
@@ -89,6 +90,7 @@ struct FanControlCardContent: View {
     let temperatureUnit: TemperatureUnit
     let authorize: () -> Void
     let applyConfiguration: (FanControlConfiguration) -> Void
+    let scheduleCurveReapply: () -> Void
     let stopCooling: () -> Void
 
     var body: some View {
@@ -116,7 +118,9 @@ struct FanControlCardContent: View {
                                           accelerationFactor: $accelerationFactor,
                                           temperatures: snapshot.temperatures ?? [],
                                           temperatureUnit: temperatureUnit,
-                                          disabled: controlsDisabled)
+                                          // Edits are coalesced by the service, so a
+                                          // request in flight must not freeze a drag.
+                                          disabled: false)
                     if !curveCanRun {
                         Text(strings.curveUnavailable)
                             .font(.system(size: 9.5))
@@ -141,8 +145,8 @@ struct FanControlCardContent: View {
     }
 
     private func reapplyCurveIfNeeded() {
-        guard mode == .curve, isCurveArmed || snapshot.isCooling, curveCanRun, !isWorking else { return }
-        applyConfiguration(curveConfiguration)
+        guard mode == .curve, isCurveArmed || snapshot.isCooling, curveCanRun else { return }
+        scheduleCurveReapply()
     }
 
     private var modePicker: some View {
@@ -328,7 +332,11 @@ struct FanControlCardContent: View {
         }
         if accessState == .notRegistered, !snapshot.fans.isEmpty { return strings.approvalCaption }
         if accessState == .requiresApproval { return strings.approvalCaption }
-        if isCurveArmed, !snapshot.isCooling { return strings.waitingForThreshold }
+        // Above the threshold the curve may still be idle because the system
+        // already runs the fans faster; "below the start temperature" would lie.
+        if isCurveArmed, !snapshot.isCooling, !sensorAboveThreshold {
+            return strings.waitingForThreshold
+        }
         switch snapshot.stopReason {
         case .temperatureUnavailable: return strings.temperatureUnavailable
         case .timeLimit, .appDisconnected, .heartbeatLost, .hardwareChanged,
@@ -376,6 +384,12 @@ struct FanControlCardContent: View {
         .curve(sensor: sensor,
                threshold: FanControlPolicy.clampedThreshold(threshold),
                accelerationFactor: FanControlPolicy.clampAccelerationFactor(accelerationFactor))
+    }
+
+    private var sensorAboveThreshold: Bool {
+        guard let celsius = snapshot.temperatures?.first(where: { $0.source == sensor })?.celsius
+        else { return false }
+        return celsius > Double(FanControlPolicy.clampedThreshold(threshold))
     }
 
     private var curveCanRun: Bool {

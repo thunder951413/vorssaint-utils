@@ -230,6 +230,88 @@ final class FanControlHardware {
                                   temperatures: readTemperatures())
     }
 
+    /// Returns the fans to the firmware for a system check without touching
+    /// their targets, so the first value the firmware writes shows up as a
+    /// change. Gives back the targets the curve had set, or nil when automatic
+    /// mode did not stick (the caller then performs a full restore).
+    func handToFirmware() -> [Double]? {
+        guard let fans = try? discoverControlledFans(),
+              activeTargets.count == fans.count else { return nil }
+        let previous = activeTargets
+        for fan in fans { _ = setMode(0, for: fan, attempts: 20) }
+        if let forceTest = forceTestKey() { _ = setByte(0, for: forceTest, attempts: 20) }
+        let automatic = fans.allSatisfy { fan in
+            (try? modeValue(fan.mode)).map(FanControlPolicy.isAutomaticMode) == true
+        }
+        let forceTestOff = forceTestKey().map { (try? byteValue($0)) == 0 } ?? true
+        return automatic && forceTestOff ? previous : nil
+    }
+
+    /// Takes back fans handed to the firmware a moment ago. They are still
+    /// spinning, so the stopped-fan start (a protective maximum target held
+    /// for seconds) is never needed here; this only re-asserts manual mode.
+    func resumeCooling(level: Int) throws -> [FanControlFanReading] {
+        let fans = try discoverControlledFans()
+        let targets = try fans.map { fan -> Double in
+            guard let target = FanControlPolicy.coolingTargetRPM(
+                minimum: fan.minimumRPM,
+                maximum: fan.maximumRPM,
+                level: level
+            ) else { throw FanControlHardwareError.operationFailed }
+            return target
+        }
+        var manual = true
+        for (fan, target) in zip(fans, targets) {
+            if !writeManualPair(for: fan, target: target) { manual = false }
+        }
+        if manual {
+            Thread.sleep(forTimeInterval: 0.1)
+            manual = fans.allSatisfy { (try? modeValue($0.mode)) == 1 }
+        }
+        if !manual {
+            guard let forceTest = forceTestKey(),
+                  setByte(1, for: forceTest, attempts: 20) else {
+                throw FanControlHardwareError.operationFailed
+            }
+            for fan in fans {
+                let deadline = ProcessInfo.processInfo.systemUptime + 3
+                guard setMode(1, for: fan, untilUptime: deadline) else {
+                    throw FanControlHardwareError.operationFailed
+                }
+            }
+        }
+        for (fan, target) in zip(fans, targets) {
+            guard setTargetRPM(target, for: fan, attempts: 10) else {
+                throw FanControlHardwareError.operationFailed
+            }
+        }
+        guard verifyCooling(fans, targets: targets, attempts: 10) else {
+            throw FanControlHardwareError.operationFailed
+        }
+        activeTargets = targets
+        return try readings(for: fans)
+    }
+
+    /// What the firmware asks for while it drives the fans. Only valid in
+    /// automatic mode. The actual speed is left out on purpose: right after a
+    /// handover it still carries the speed the curve was running.
+    func systemDemandReadings() throws -> [FanControlFanReading] {
+        let fans = try discoverControlledFans()
+        return try fans.map { fan in
+            guard try FanControlPolicy.isAutomaticMode(modeValue(fan.mode)),
+                  let target = client.readValue(fan.target),
+                  FanControlPolicy.validReading(target) else {
+                throw FanControlHardwareError.operationFailed
+            }
+            return FanControlFanReading(index: fan.index,
+                                        actualRPM: 0,
+                                        minimumRPM: fan.minimumRPM,
+                                        maximumRPM: fan.maximumRPM,
+                                        targetRPM: target,
+                                        isManuallyControlled: false)
+        }
+    }
+
     func coolingIsIntact() -> Bool {
         guard let fans = try? discoverControlledFans() else { return false }
         return verifyCooling(fans, targets: activeTargets)

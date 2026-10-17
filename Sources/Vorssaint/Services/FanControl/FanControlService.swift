@@ -34,6 +34,11 @@ final class FanControlService: ObservableObject {
     private var registrationAttemptedVersion: String?
     private var observingWorkspace = false
     private var probeInFlight = false
+    private var takeoverConfirmations = 0
+    private var takeoverRetryNotBefore: TimeInterval = 0
+    private var curveReapplyWorkItem: DispatchWorkItem?
+    private var curveReapplyPending = false
+    private static let curveReapplyDelay: TimeInterval = 0.4
 
     private static var appService: SMAppService {
         SMAppService.daemon(plistName: FanControlIdentifiers.plistName)
@@ -175,6 +180,7 @@ final class FanControlService: ObservableObject {
             return
         }
         error = nil
+        if userInitiated { takeoverRetryNotBefore = 0 }
         let retrySnapshot = snapshot
         let armCurve = configuration.mode == .curve
         startObservingSystemState()
@@ -207,6 +213,12 @@ final class FanControlService: ObservableObject {
                     }
                 }
             } else {
+                // An automatic takeover the helper refused (another fan tool,
+                // unreadable sensor) must not be retried every poll.
+                if !userInitiated {
+                    self.takeoverRetryNotBefore = ProcessInfo.processInfo.systemUptime
+                        + FanControlPolicy.takeoverRetryBackoff
+                }
                 self.restoreAutomatic(supersedingCurrentRequest: false,
                                       preserving: response.error ?? .controlFailed,
                                       retrySnapshot: retrySnapshot)
@@ -216,8 +228,46 @@ final class FanControlService: ObservableObject {
     }
 
     func restoreAutomatic() {
+        cancelCurveReapply()
         setCurveArmed(false)
         restoreAutomatic(supersedingCurrentRequest: false)
+    }
+
+    /// Curve settings edited while a curve is armed or running. Rapid slider
+    /// changes collapse into one request, and a change made while another
+    /// request is in flight is sent once it finishes, so the helper always
+    /// ends up on the latest stored values instead of the first one dragged.
+    func scheduleCurveReapply() {
+        curveReapplyWorkItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.curveReapplyWorkItem = nil
+            self.curveReapplyPending = true
+            self.performCurveReapply()
+        }
+        curveReapplyWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.curveReapplyDelay, execute: item)
+    }
+
+    private func cancelCurveReapply() {
+        curveReapplyWorkItem?.cancel()
+        curveReapplyWorkItem = nil
+        curveReapplyPending = false
+    }
+
+    private func performCurveReapply() {
+        guard curveReapplyPending else { return }
+        let curveActive = isCurveArmed
+            || (snapshot.isCooling && snapshot.configuration?.mode == .curve)
+        guard curveActive else {
+            curveReapplyPending = false
+            return
+        }
+        // Retried from finishRequest once the current request settles.
+        guard !isWorking, !requestInFlight else { return }
+        curveReapplyPending = false
+        takeoverConfirmations = 0
+        applyStoredCurve(userInitiated: false)
     }
 
     private func setCurveArmed(_ armed: Bool) {
@@ -501,6 +551,11 @@ final class FanControlService: ObservableObject {
     private func finishRequest(_ generation: Int) -> Bool {
         guard generation == requestGeneration else { return false }
         requestInFlight = false
+        if curveReapplyPending {
+            // Deferred so it runs after the caller's completion has settled
+            // isWorking and the armed state.
+            DispatchQueue.main.async { [weak self] in self?.performCurveReapply() }
+        }
         return true
     }
 
@@ -738,10 +793,18 @@ final class FanControlService: ObservableObject {
                     ?? FanControlPolicy.defaultAccelerationFactor),
             temperatures: snapshot.temperatures ?? []
         ) {
-        case .cooling:
+        // Above the threshold is not enough: taking over switches the system's
+        // own controller off, so it only happens when the curve wants clearly
+        // more than the fans already run. The helper applies the same gate.
+        case .cooling(let level)
+            where FanControlPolicy.shouldTakeOver(level: level, fans: snapshot.fans):
+            takeoverConfirmations += 1
+            guard takeoverConfirmations >= FanControlPolicy.takeoverConfirmationSamples,
+                  ProcessInfo.processInfo.systemUptime >= takeoverRetryNotBefore else { return }
+            takeoverConfirmations = 0
             applyStoredCurve(userInitiated: false)
-        case .belowThreshold, .unavailable:
-            break
+        case .cooling, .belowThreshold, .unavailable:
+            takeoverConfirmations = 0
         }
     }
 

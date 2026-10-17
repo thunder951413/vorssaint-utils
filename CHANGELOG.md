@@ -55,6 +55,8 @@ App Switcher shows more window previews, and shortcut fields accept macOS shortc
 - The media tools describe each compression level under the Low, Medium and High buttons. Thanks to @samanyudas.
 
 ### Fixed
+- Fan Control's custom curve no longer freezes the fans at their current speed once the start temperature is crossed: it takes over only when it wants clearly more cooling than the system already runs, hands back once it wants less, and holds control at least 30 seconds so readings near the threshold cannot make the fans surge repeatedly. While running it checks what macOS would ask for whenever the sensor warms, and at least every three minutes, by handing the fans back only until macOS writes its own target, so the check does not audibly change their speed; it hands back whenever the system would already cool harder.
+- Dragging the Fan Control threshold or acceleration sliders while a curve is active no longer locks the slider or leaves the helper on the first value dragged.
 - Keep Awake restores lid sleep after a timer or battery cutoff, respecting macOS sleep protections. Thanks to @NongKnot.
 - Dynamic Island shows a video playing in a browser even when a music app is open but stopped. Thanks to @ruvelro.
 - Stopping Music from opening on its own again catches launches from headphones connecting or their buttons, and no longer needs Accessibility.

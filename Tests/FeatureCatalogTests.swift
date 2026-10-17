@@ -737,6 +737,57 @@ enum FeatureCatalogTests {
                 && FanControlPolicy.appliedCoolingLevel(10, floorLevel: 15) == 15
                 && FanControlPolicy.appliedCoolingLevel(100, floorLevel: 15) == 100,
                "takeover only raises the captured system floor and emergency cooling ignores it")
+        suite.expect(!FanControlPolicy.shouldTakeOver(level: 15, fans: takeoverFans)
+                && FanControlPolicy.shouldTakeOver(level: 20, fans: takeoverFans),
+               "above the threshold the system keeps control until the curve wants clearly more")
+        suite.expect(FanControlPolicy.shouldHandBack(requestedLevel: 10, floorLevel: 15)
+                && !FanControlPolicy.shouldHandBack(requestedLevel: 15, floorLevel: 15)
+                && !FanControlPolicy.shouldHandBack(requestedLevel: 0, floorLevel: 0)
+                && !FanControlPolicy.shouldHandBack(requestedLevel: 100, floorLevel: 100),
+               "a curve hands back once it wants less than the system ran, never at emergency")
+        suite.expect(FanControlPolicy.curveHoldElapsed(startedAt: nil, now: 5)
+                && !FanControlPolicy.curveHoldElapsed(startedAt: 100, now: 129)
+                && FanControlPolicy.curveHoldElapsed(startedAt: 100, now: 130),
+               "a fresh takeover holds control for the minimum duration")
+        suite.expect(!FanControlPolicy.systemCheckDue(lastCheck: nil, controlStarted: nil, now: 500,
+                                                      referenceTemperature: 70, temperature: 90)
+                && !FanControlPolicy.systemCheckDue(lastCheck: nil, controlStarted: 100, now: 119,
+                                                    referenceTemperature: 70, temperature: 80)
+                && FanControlPolicy.systemCheckDue(lastCheck: nil, controlStarted: 100, now: 120,
+                                                   referenceTemperature: 70, temperature: 72)
+                && !FanControlPolicy.systemCheckDue(lastCheck: 200, controlStarted: 100, now: 300,
+                                                    referenceTemperature: 70, temperature: 71.5)
+                && !FanControlPolicy.systemCheckDue(lastCheck: 200, controlStarted: 100, now: 300,
+                                                    referenceTemperature: 70, temperature: 60)
+                && FanControlPolicy.systemCheckDue(lastCheck: 200, controlStarted: 100, now: 380,
+                                                   referenceTemperature: 70, temperature: 60),
+               "a running curve re-checks the firmware when the sensor warms, plus a slow backstop")
+        let curveTargets = [3_040.0, 3_040.0]
+        let unchangedFirmware = curveTargets.enumerated().map { index, target in
+            FanControlFanReading(index: index, actualRPM: 0, minimumRPM: 1_200,
+                                 maximumRPM: 5_800, targetRPM: target,
+                                 isManuallyControlled: false)
+        }
+        var movedFirmware = unchangedFirmware
+        movedFirmware[1] = FanControlFanReading(index: 1, actualRPM: 0, minimumRPM: 1_200,
+                                                maximumRPM: 5_800, targetRPM: 3_500,
+                                                isManuallyControlled: false)
+        suite.expect(!FanControlPolicy.firmwareResponded(previousTargets: curveTargets,
+                                                         fans: unchangedFirmware)
+                && FanControlPolicy.firmwareResponded(previousTargets: curveTargets,
+                                                      fans: movedFirmware)
+                && !FanControlPolicy.firmwareResponded(previousTargets: [3_040],
+                                                       fans: movedFirmware),
+               "a check sees the firmware answer as soon as any fan target moves")
+        let firmwareAsksMore = [
+            FanControlFanReading(index: 0, actualRPM: 0, minimumRPM: 1_200,
+                                 maximumRPM: 5_800, targetRPM: 3_500,
+                                 isManuallyControlled: false)
+        ]
+        suite.expect(!FanControlPolicy.shouldTakeOver(level: 40, fans: firmwareAsksMore)
+                && FanControlPolicy.shouldTakeOver(level: 55, fans: firmwareAsksMore)
+                && FanControlPolicy.floorCoolingLevel(fans: firmwareAsksMore) == 50,
+               "a check hands back when the firmware already asks for more than the curve")
         let defaultCurve = FanControlConfiguration.defaultCurve
         let duplicateCurves = [defaultCurve,
                                FanControlCurve(sensor: .hottestCPU, points: defaultCurve.points)]
