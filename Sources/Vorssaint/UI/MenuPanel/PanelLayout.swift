@@ -10,7 +10,7 @@ protocol PanelOrderItem: RawRepresentable, CaseIterable, Hashable where RawValue
 /// stable identifiers persisted in the saved order and the collapsed set, so
 /// renaming a case would orphan a user's stored layout — keep them stable.
 enum PanelSectionID: String, CaseIterable, Identifiable, Hashable {
-    case keepAwake, brightness, displayColor, mixer, system, network, disk, power, fanControl, utilities, controls,
+    case keepAwake, brightness, mixer, system, network, disk, power, fanControl, utilities, controls,
          toggles
 
     var id: String { rawValue }
@@ -20,7 +20,6 @@ enum PanelSectionID: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .keepAwake: return s.keepAwakeTitle
         case .brightness: return FeatureStrings.brightness(L10n.shared.language).pageTitle
-        case .displayColor: return FeatureStrings.displayColor(L10n.shared.language).title
         case .mixer: return s.mixerSection
         case .system: return s.systemSection
         case .network: return s.networkSection
@@ -37,7 +36,6 @@ enum PanelSectionID: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .keepAwake: return "moon.zzz.fill"
         case .brightness: return "display.2"
-        case .displayColor: return "sunset.fill"
         case .mixer: return "slider.horizontal.3"
         case .system: return "cpu"
         case .network: return "network"
@@ -57,7 +55,6 @@ enum PanelSectionID: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .keepAwake: return DefaultsKey.panelShowKeepAwake
         case .brightness: return DefaultsKey.panelShowBrightness
-        case .displayColor: return DefaultsKey.panelShowDisplayColor
         case .mixer: return DefaultsKey.monitorShowMixer
         case .system: return DefaultsKey.monitorShowSystem
         case .network: return DefaultsKey.monitorShowNetwork
@@ -80,8 +77,8 @@ enum PanelSectionID: String, CaseIterable, Identifiable, Hashable {
     var featureGate: [AppFeature] {
         switch self {
         case .keepAwake: return [.keepAwake]
-        case .brightness: return [.brightness]
-        case .displayColor: return [.displayColor]
+        // The colour filter lives inside the display section.
+        case .brightness: return [.brightness, .displayColor]
         case .mixer: return [.mixer]
         case .system: return [.monitorCPU, .monitorGPU, .monitorMemory]
         case .network: return [.monitorNetwork]
@@ -130,11 +127,6 @@ enum PanelLayout {
                 // New in 3.1.13: saved orders predate it, so it slots in at
                 // its canonical place instead of the end.
                 result.insert(id, at: keepAwakeIndex + 1)
-            } else if id == .displayColor,
-                      let anchor = result.firstIndex(of: .brightness) ?? result.firstIndex(of: .keepAwake) {
-                // Saved orders predate the colour filter; it joins its
-                // display neighbour instead of the end.
-                result.insert(id, at: anchor + 1)
             } else {
                 result.append(id)
             }
@@ -174,7 +166,10 @@ enum PanelLayout {
     /// live panel and its preview in Settings both read.
     static func isVisibleInPanel(_ id: PanelSectionID) -> Bool {
         guard id.isAvailable, isShown(id) else { return false }
-        return id != .brightness || defaults.bool(forKey: DefaultsKey.brightnessControlEnabled)
+        guard id == .brightness else { return true }
+        // The display section also carries the colour filter, which keeps it
+        // up while brightness control itself is off.
+        return BrightnessSection.showsBrightness || AppFeature.displayColor.isAvailable
     }
 
     static func isCollapsed(_ id: PanelSectionID) -> Bool {

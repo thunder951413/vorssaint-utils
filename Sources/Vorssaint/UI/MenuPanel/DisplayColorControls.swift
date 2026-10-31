@@ -3,20 +3,6 @@
 
 import SwiftUI
 
-/// Panel section for the screen colour filter.
-struct DisplayColorSection: View {
-    @ObservedObject private var l10n = L10n.shared
-    var collapsible = true
-
-    var body: some View {
-        PanelSection(.displayColor, title: FeatureStrings.displayColor(l10n.language).title,
-                     collapsible: collapsible) {
-            DisplayColorControls(compact: true)
-                .panelCard()
-        }
-    }
-}
-
 /// The filter's controls, shared by the panel and the Energy page: on/off,
 /// the mode, and one editor per look. In the automatic mode the edited phase
 /// is shown on screen for a moment, so night can be tuned during the day.
@@ -268,15 +254,21 @@ private struct DisplayColorScheduleOptions: View {
 }
 
 /// One look: the white balance slider over a strip of the colours it runs
-/// through, and the tint wheel with its strength.
+/// through, then the tint: a row of preset hues for a quick pick, a hue
+/// slider over the rainbow for fine tuning, and its strength.
 struct DisplayColorSettingEditor: View {
     let setting: DisplayColorSetting
     let strings: DisplayColorFeatureStrings
     var compact = true
     let onChange: (DisplayColorSetting) -> Void
 
+    /// Red, orange, amber, green, cyan, blue, violet, pink.
+    static let presetHues: [Double] = [0, 0.06, 0.12, 0.33, 0.5, 0.6, 0.75, 0.9]
+    /// The strength a preset starts at when no tint is set yet.
+    static let presetStrength = 0.3
+
     private var fontSize: CGFloat { compact ? 11 : 13 }
-    private var wheelSize: CGFloat { compact ? 96 : 128 }
+    private var swatchSize: CGFloat { compact ? 18 : 22 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -301,37 +293,10 @@ struct DisplayColorSettingEditor: View {
                     .clipShape(Capsule())
                     .accessibilityHidden(true)
             }
-            HStack(alignment: .center, spacing: 12) {
-                ColorWheelPicker(hue: setting.tintHue, strength: setting.tintStrength,
-                                 size: wheelSize) { hue, strength in
-                    var next = setting
-                    next.tintHue = hue
-                    next.tintStrength = strength
-                    onChange(next)
-                }
-                .accessibilityLabel(strings.tint)
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text(strings.tint)
-                        Spacer(minLength: 4)
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(Self.color(DisplayColorSupport.gains(for: setting)))
-                            .overlay(RoundedRectangle(cornerRadius: 3)
-                                .stroke(Color.primary.opacity(0.2), lineWidth: 0.5))
-                            .frame(width: 22, height: 12)
-                            .accessibilityHidden(true)
-                    }
-                    HStack {
-                        Text(strings.tintStrength)
-                            .foregroundStyle(.secondary)
-                        Spacer(minLength: 4)
-                        Text("\(Int((setting.tintStrength * 100).rounded()))%")
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                    }
-                    Slider(value: strengthBinding, in: 0...1)
-                        .controlSize(.small)
-                        .accessibilityLabel(strings.tintStrength)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(strings.tint)
+                    Spacer(minLength: 4)
                     Button(strings.clearTint) {
                         var next = setting
                         next.tintStrength = 0
@@ -339,10 +304,63 @@ struct DisplayColorSettingEditor: View {
                     }
                     .buttonStyle(.link)
                     .disabled(setting.tintStrength == 0)
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(Self.color(DisplayColorSupport.gains(for: setting)))
+                        .overlay(RoundedRectangle(cornerRadius: 3)
+                            .stroke(Color.primary.opacity(0.2), lineWidth: 0.5))
+                        .frame(width: 22, height: 12)
+                        .accessibilityHidden(true)
                 }
+                swatches
+                Slider(value: hueBinding, in: 0...1)
+                    .controlSize(.small)
+                    .accessibilityLabel(strings.tint)
+                LinearGradient(colors: stride(from: 0.0, through: 1.0, by: 1.0 / 12).map {
+                                   Color(hue: $0, saturation: 0.85, brightness: 1)
+                               },
+                               startPoint: .leading, endPoint: .trailing)
+                    .frame(height: 4)
+                    .clipShape(Capsule())
+                    .accessibilityHidden(true)
+                HStack {
+                    Text(strings.tintStrength)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 4)
+                    Text("\(Int((setting.tintStrength * 100).rounded()))%")
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.top, 2)
+                Slider(value: strengthBinding, in: 0...1)
+                    .controlSize(.small)
+                    .accessibilityLabel(strings.tintStrength)
             }
         }
         .font(.system(size: fontSize, weight: .medium))
+    }
+
+    private var swatches: some View {
+        HStack(spacing: 0) {
+            ForEach(Self.presetHues, id: \.self) { hue in
+                let selected = setting.tintStrength > 0 && Self.hueDistance(setting.tintHue, hue) < 0.005
+                Button {
+                    var next = setting
+                    next.tintHue = hue
+                    if next.tintStrength == 0 { next.tintStrength = Self.presetStrength }
+                    onChange(next)
+                } label: {
+                    Circle()
+                        .fill(Color(hue: hue, saturation: 0.85, brightness: 1))
+                        .overlay(Circle().stroke(Color.primary.opacity(0.25), lineWidth: 0.5))
+                        .padding(selected ? 3 : 0)
+                        .overlay(Circle().stroke(Color.accentColor, lineWidth: selected ? 2 : 0))
+                        .frame(width: swatchSize, height: swatchSize)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity)
+            }
+        }
     }
 
     private var kelvinBinding: Binding<Double> {
@@ -354,60 +372,33 @@ struct DisplayColorSettingEditor: View {
                 })
     }
 
-    private var strengthBinding: Binding<Double> {
-        Binding(get: { setting.tintStrength },
+    private var hueBinding: Binding<Double> {
+        Binding(get: { setting.tintHue },
                 set: { value in
                     var next = setting
-                    next.tintStrength = value
+                    next.tintHue = (value * 360).rounded() / 360
+                    // Moving the hue with no tint set would show nothing.
+                    if next.tintStrength == 0 { next.tintStrength = Self.presetStrength }
                     onChange(next)
                 })
     }
 
+    private var strengthBinding: Binding<Double> {
+        Binding(get: { setting.tintStrength },
+                set: { value in
+                    var next = setting
+                    next.tintStrength = (value * 100).rounded() / 100
+                    onChange(next)
+                })
+    }
+
+    /// Distance between two hues around the circle.
+    static func hueDistance(_ a: Double, _ b: Double) -> Double {
+        let d = abs(a - b).truncatingRemainder(dividingBy: 1)
+        return min(d, 1 - d)
+    }
+
     static func color(_ gains: DisplayColorGains) -> Color {
         Color(red: gains.red, green: gains.green, blue: gains.blue)
-    }
-}
-
-/// A hue wheel: the angle picks the colour, the distance from the centre how
-/// strongly white is pushed toward it.
-struct ColorWheelPicker: View {
-    let hue: Double
-    let strength: Double
-    let size: CGFloat
-    let onChange: (Double, Double) -> Void
-
-    var body: some View {
-        let radius = size / 2
-        let angle = hue * 2 * .pi
-        let knob = CGPoint(x: radius + cos(angle) * radius * strength,
-                           y: radius + sin(angle) * radius * strength)
-        ZStack {
-            Circle()
-                .fill(AngularGradient(colors: stride(from: 0.0, through: 1.0, by: 1.0 / 12).map {
-                                          Color(hue: $0, saturation: 1, brightness: 1)
-                                      },
-                                      center: .center))
-            Circle()
-                .fill(RadialGradient(colors: [.white, .white.opacity(0)],
-                                     center: .center, startRadius: 0, endRadius: radius))
-            Circle()
-                .stroke(Color.primary.opacity(0.2), lineWidth: 0.5)
-            Circle()
-                .fill(Color(hue: hue, saturation: strength, brightness: 1))
-                .overlay(Circle().stroke(Color.white, lineWidth: 2))
-                .shadow(color: .black.opacity(0.35), radius: 1.5)
-                .frame(width: 14, height: 14)
-                .position(knob)
-        }
-        .frame(width: size, height: size)
-        .contentShape(Circle())
-        .gesture(DragGesture(minimumDistance: 0).onChanged { value in
-            let dx = value.location.x - radius
-            let dy = value.location.y - radius
-            let distance = min(sqrt(dx * dx + dy * dy) / radius, 1)
-            var newHue = atan2(dy, dx) / (2 * .pi)
-            if newHue < 0 { newHue += 1 }
-            onChange(Double(newHue), Double(distance))
-        })
     }
 }

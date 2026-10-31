@@ -3,58 +3,106 @@
 
 import SwiftUI
 
-/// Panel section with one brightness slider per adjustable display. Values
-/// refresh whenever the section appears, so changes made with the keyboard,
-/// in System Settings or on the monitor itself are picked up.
+/// Panel section with one brightness slider per adjustable display, and the
+/// screen colour filter below them. Values refresh whenever the section
+/// appears, so changes made with the keyboard, in System Settings or on the
+/// monitor itself are picked up.
 struct BrightnessSection: View {
     @ObservedObject private var l10n = L10n.shared
     @ObservedObject private var service = BrightnessService.shared
     @ObservedObject private var permissions = Permissions.shared
     @AppStorage(DefaultsKey.brightnessOSDEnabled) private var brightnessOSDEnabled = false
     @AppStorage(DefaultsKey.brightnessKeysEnabled) private var brightnessKeysEnabled = false
+    @AppStorage(DefaultsKey.brightnessControlEnabled) private var brightnessEnabled = false
+    @AppStorage(DefaultsKey.panelDisplayColorExpanded) private var colorExpanded = false
     @State private var optionsExpanded = false
     var collapsible = true
+
+    static var showsBrightness: Bool {
+        AppFeature.brightness.isAvailable
+            && UserDefaults.standard.bool(forKey: DefaultsKey.brightnessControlEnabled)
+    }
 
     private var strings: BrightnessFeatureStrings { FeatureStrings.brightness(l10n.language) }
 
     var body: some View {
         PanelSection(.brightness, title: strings.pageTitle, collapsible: collapsible) {
             VStack(alignment: .leading, spacing: 10) {
-                if service.displays.isEmpty {
-                    Text(strings.noDisplays)
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(service.displays) { display in
-                        row(display)
-                    }
+                if brightnessEnabled, AppFeature.brightness.isAvailable {
+                    brightnessControls
                 }
-                if let failure = service.displayControlFailure {
-                    Text(displayControlFailureText(failure, strings: strings))
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(.red)
+                if AppFeature.displayColor.isAvailable {
+                    if brightnessEnabled, AppFeature.brightness.isAvailable { Divider() }
+                    colorDisclosure
                 }
-                if service.brightnessOSDSupported {
-                    Divider()
-                    Toggle(strings.osdToggle, isOn: $brightnessOSDEnabled)
-                        .font(.system(size: 10.5, weight: .medium))
-                        .toggleStyle(.switch)
-                        .controlSize(.mini)
-                        .help(strings.osdCaption)
-                        .onChange(of: brightnessOSDEnabled) { _, isOn in
-                            if isOn { permissions.requestAccessibility() }
-                            service.syncWithPreferences()
-                        }
-                }
-                if AppFeature.extraBrightness.isAvailable {
-                    Divider()
-                    ExtraBrightnessPanelToggle()
-                }
-                Divider()
-                optionsDisclosure
             }
             .panelCard()
             .onAppear { service.refresh() }
+        }
+    }
+
+    @ViewBuilder
+    private var brightnessControls: some View {
+        if service.displays.isEmpty {
+            Text(strings.noDisplays)
+                .font(.system(size: 10.5))
+                .foregroundStyle(.secondary)
+        } else {
+            ForEach(service.displays) { display in
+                row(display)
+            }
+        }
+        if let failure = service.displayControlFailure {
+            Text(displayControlFailureText(failure, strings: strings))
+                .font(.system(size: 10.5))
+                .foregroundStyle(.red)
+        }
+        if service.brightnessOSDSupported {
+            Divider()
+            Toggle(strings.osdToggle, isOn: $brightnessOSDEnabled)
+                .font(.system(size: 10.5, weight: .medium))
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .help(strings.osdCaption)
+                .onChange(of: brightnessOSDEnabled) { _, isOn in
+                    if isOn { permissions.requestAccessibility() }
+                    service.syncWithPreferences()
+                }
+        }
+        if AppFeature.extraBrightness.isAvailable {
+            Divider()
+            ExtraBrightnessPanelToggle()
+        }
+        Divider()
+        optionsDisclosure
+    }
+
+    private var colorDisclosure: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                colorExpanded.toggle()
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 12)
+                        .rotationEffect(.degrees(colorExpanded ? 90 : 0))
+                    Image(systemName: "sunset.fill")
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Text(FeatureStrings.displayColor(l10n.language).title)
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if colorExpanded {
+                DisplayColorControls(compact: true)
+            }
         }
     }
 

@@ -164,6 +164,9 @@ final class BrightnessService: ObservableObject {
         var fingerprint: String
     }
     private var lastApplied: [CGDirectDisplayID: RememberedLevel] = [:]
+    /// DDC paths whose monitor this session already turned up to full for
+    /// software dimming. Guarded by `stateLock`.
+    private var hardwareRaisedPaths = Set<String>()
     /// When each display's remembered level was last known to match the
     /// monitor, so a step can tell a value it just wrote from one that has
     /// been sitting around while the monitor moved on without it.
@@ -1630,6 +1633,7 @@ final class BrightnessService: ObservableObject {
                     // probe on a channel whose answer was already rejected.
                     forcedSoftwareIDs.insert(id)
                     softwarePathKeys[id] = pathKey
+                    raiseHardwareForSoftwareDimming(id, service: matched.service, pathKey: pathKey)
                     continue
                 }
                 let rememberedWriteOnly = !BrightnessSupport.shouldProbeDDC(
@@ -1927,6 +1931,9 @@ final class BrightnessService: ObservableObject {
             defaults.set(updated, forKey: DefaultsKey.brightnessForcedSoftwarePaths)
         }
         forgetWriteOnlyDDCPath(pathKey)
+        stateLock.lock()
+        hardwareRaisedPaths.remove(pathKey)
+        stateLock.unlock()
         Self.log.log("display \(id) software dimming preferred \(preferred)")
         guard !preferred else {
             refresh(force: true)
@@ -1948,6 +1955,34 @@ final class BrightnessService: ObservableObject {
             self.applySoftwareDim(id, value: 1)
             DispatchQueue.main.async { [weak self] in self?.refresh(force: true) }
         }
+    }
+
+    /// Gamma dimming can only take away from what the monitor's backlight
+    /// gives, so a monitor left dim on its own buttons capped the slider's
+    /// top at that dim level. When the display still has a DDC channel, its
+    /// backlight goes to full once per session and the curve does all the
+    /// dimming from there. Runs on the work queue.
+    private func raiseHardwareForSoftwareDimming(_ id: CGDirectDisplayID,
+                                                 service: CFTypeRef, pathKey: String) {
+        stateLock.lock()
+        let inserted = hardwareRaisedPaths.insert(pathKey).inserted
+        stateLock.unlock()
+        guard inserted else { return }
+        let target: UInt16
+        switch ddcProbeLuminance(for: id, service: service) {
+        case .replied(let current, let maximum):
+            let ceiling = BrightnessSupport.sanitizedMaximum(maximum)
+            guard current < ceiling else { return }
+            target = ceiling
+        case .writeOnly:
+            target = 100
+        case .dead:
+            return
+        }
+        let packet = BrightnessSupport.writePacket(code: BrightnessSupport.luminanceCode,
+                                                   value: target)
+        let ok = ddcSend(to: id, service: service, packet: packet)
+        Self.log.log("display \(id) backlight raised to \(target) for software dimming ok \(ok)")
     }
 
     private func writeOnlyDDCPaths() -> Set<String> {
