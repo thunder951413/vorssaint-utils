@@ -312,6 +312,7 @@ if (( TEST )); then
         Sources/Vorssaint/Core/SnippetStrings.swift
         Sources/Vorssaint/Core/AlertSoundStrings.swift
         Sources/Vorssaint/Core/BrightnessStrings.swift
+        Sources/Vorssaint/Core/DisplayColorStrings.swift
         Sources/Vorssaint/Core/MediaImageStrings.swift
         Sources/Vorssaint/Core/QuickToggleStrings.swift
         Sources/Vorssaint/Core/ScreenshotStrings.swift
@@ -487,6 +488,7 @@ if (( TEST )); then
         Sources/Vorssaint/Services/CleaningMode/CleaningUnlockCounter.swift
         Sources/Vorssaint/Services/Display/ExtraBrightnessSupport.swift
         Sources/Vorssaint/Services/Display/BrightnessSupport.swift
+        Sources/Vorssaint/Services/Display/DisplayColorSupport.swift
         Sources/Vorssaint/Services/Cleaner/CleanerSupport.swift
         Sources/Vorssaint/Services/Cleaner/CleanerPolicy.swift
         Sources/Vorssaint/Services/Cleaner/CleanerSchedule.swift

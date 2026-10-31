@@ -115,7 +115,7 @@ extension AppFeature {
         case .notchNotifications, .notchGestures, .notchTimer, .notchQueue, .notchDownloads: return .idle
         case .notchAccessories: return .periodic
         case .notch, .notchCalendar, .notchLyrics, .notchLiveEqualizer: return .periodic
-        case .clipboardHistory, .urlCleaner, .extraBrightness,
+        case .clipboardHistory, .urlCleaner, .extraBrightness, .displayColor,
              .monitorCPU, .monitorGPU, .monitorMemory,
              .monitorNetwork, .monitorDisk, .monitorPower:
             return .periodic

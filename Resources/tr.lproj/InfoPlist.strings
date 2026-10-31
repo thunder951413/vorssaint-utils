@@ -22,3 +22,7 @@
 "NSNetworkVolumesUsageDescription" = "Vorssaint, doğrulanmış WhatsApp indirmelerini açıkça seçtiğiniz bir hedef klasörde düzenler.";
 "NSRemovableVolumesUsageDescription" = "Vorssaint, doğrulanmış WhatsApp indirmelerini açıkça seçtiğiniz bir hedef klasörde düzenler.";
 "NSCalendarsFullAccessUsageDescription" = "Yaklaşan randevularınızı ekranın üst kısmında gösterir. Takvim etkinlikleri bu Mac’te kalır.";
+
+/* macOS Location permission prompt. */
+"NSLocationUsageDescription" = "Vorssaint yaklaşık konumunuzu yalnızca ekran renk filtresi için gün doğumu ve batımını hesaplamakta kullanır. Hiçbir veri Mac'inizden çıkmaz.";
+"NSLocationWhenInUseUsageDescription" = "Vorssaint yaklaşık konumunuzu yalnızca ekran renk filtresi için gün doğumu ve batımını hesaplamakta kullanır. Hiçbir veri Mac'inizden çıkmaz.";

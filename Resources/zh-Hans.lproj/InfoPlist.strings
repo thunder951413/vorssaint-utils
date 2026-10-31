@@ -22,3 +22,7 @@
 "NSNetworkVolumesUsageDescription" = "Vorssaint 将确认的 WhatsApp 下载整理到你明确选择的目标文件夹中。";
 "NSRemovableVolumesUsageDescription" = "Vorssaint 将确认的 WhatsApp 下载整理到你明确选择的目标文件夹中。";
 "NSCalendarsFullAccessUsageDescription" = "在屏幕顶部显示即将到来的日程。日历事件仅保留在这台 Mac 上。";
+
+/* macOS Location permission prompt. */
+"NSLocationUsageDescription" = "Vorssaint 仅使用你的大致位置来计算屏幕色彩滤镜的日出和日落时间。不会有任何数据离开你的 Mac。";
+"NSLocationWhenInUseUsageDescription" = "Vorssaint 仅使用你的大致位置来计算屏幕色彩滤镜的日出和日落时间。不会有任何数据离开你的 Mac。";

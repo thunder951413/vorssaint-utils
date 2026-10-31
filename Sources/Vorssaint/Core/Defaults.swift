@@ -175,6 +175,8 @@ enum DefaultsKey {
     static let extraBrightnessEnabled = "extraBrightnessEnabled"
     static let extraBrightnessLevel = "extraBrightnessLevel"   // Int percent 0-100
     static let brightnessControlEnabled = "brightnessControlEnabled" // sliders for every display
+    static let displayColorEnabled = "displayColorEnabled" // warm / tint filter on every screen
+    static let displayColorConfiguration = "displayColorConfiguration" // JSON DisplayColorConfiguration
     static let brightnessKeysEnabled = "brightnessKeysEnabled" // brightness keys act on the display under the pointer
     static let brightnessOSDEnabled = "brightnessOSDEnabled" // brightness adjustment overlay
     static let displayBrightnessShortcutsEnabled = "displayBrightnessShortcutsEnabled"
@@ -364,6 +366,7 @@ enum DefaultsKey {
     static let monitorShowPower = "monitorShowPower"
     static let monitorShowMixer = "monitorShowMixer"
     static let panelShowFanControl = "panelShowFanControl"
+    static let panelShowDisplayColor = "panelShowDisplayColor"
     static let fanControlMode = "fanControlMode"
     static let fanControlCoolingLevel = "fanControlCoolingLevel"
     static let fanControlCurves = "fanControlCurves"
@@ -1103,6 +1106,7 @@ enum Defaults {
         DefaultsKey.extraBrightnessEnabled: false,
         DefaultsKey.extraBrightnessLevel: 100,
         DefaultsKey.brightnessControlEnabled: false,
+        DefaultsKey.displayColorEnabled: false,
         DefaultsKey.brightnessKeysEnabled: false,
         DefaultsKey.brightnessOSDEnabled: false,
         DefaultsKey.displayBrightnessShortcutsEnabled: false,
@@ -1323,6 +1327,7 @@ enum Defaults {
         DefaultsKey.monitorShowPower: true,
         DefaultsKey.monitorShowMixer: true,
         DefaultsKey.panelShowFanControl: true,
+        DefaultsKey.panelShowDisplayColor: true,
         DefaultsKey.fanControlMode: FanControlMode.curve.rawValue,
         DefaultsKey.fanControlCoolingLevel: FanControlPolicy.defaultCoolingLevel,
         DefaultsKey.fanControlCurves: FanControlConfiguration.defaultCurvesStorage,

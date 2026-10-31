@@ -62,6 +62,12 @@ struct EnergySettings: View {
                     bluetoothCard
                         .settingsSectionAnchor(.bluetoothSleep, cornerRadius: 16)
                 }
+                if AppFeature.displayColor.isAvailable {
+                    SettingsCard {
+                        DisplayColorControls(compact: false)
+                    }
+                    .settingsSectionAnchor(.displayColor, cornerRadius: 16)
+                }
             }
             .frame(maxWidth: 760)
             .frame(maxWidth: .infinity)

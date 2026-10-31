@@ -175,34 +175,13 @@ final class BrightnessService: ObservableObject {
     /// When the previous DDC command to each display finished, so the next
     /// one keeps the standard's spacing. Touched only on the work queue.
     private var ddcCommandEnds: [CGDirectDisplayID: UInt64] = [:]
-    /// The unmodified gamma curve of each software-dimmed display, captured
-    /// before the first change so restoring is exact. Touched only on the
-    /// work queue.
-    private var gammaBaselines: [CGDirectDisplayID: GammaTable] = [:]
-    /// How many untouched curves are worth keeping for displays that are not
-    /// attached right now. A curve is a few kilobytes and keeping it is what
-    /// makes a reconnection safe, so the cap only exists so a long session
-    /// full of different monitors cannot grow without bound.
-    private static let rememberedGammaBaselines = 16
-    /// Displays whose picture is currently scaled by this app. While a display
-    /// is in here its live curve is ours, not its own, so it is never read
-    /// back as a baseline. Touched only on the work queue.
-    private var dimmedDisplays = Set<CGDirectDisplayID>()
-
-    private struct GammaTable {
-        var red: [CGGammaValue]
-        var green: [CGGammaValue]
-        var blue: [CGGammaValue]
-        var count: UInt32
-        /// Which monitor the curve was read from. Display numbers are handed
-        /// out again after a reconnection, so this is what stops one
-        /// monitor's curve from ever being written to another.
-        var fingerprint: String
-    }
+    /// Software dimming shares the gamma curve with the colour filter, so the
+    /// curves, their baselines and the dim factors live in the compositor.
+    private let gamma = DisplayGammaCompositor.shared
 
     /// Identifies the physical monitor behind a display number.
     private static func displayFingerprint(_ id: CGDirectDisplayID) -> String {
-        "\(CGDisplayVendorNumber(id)):\(CGDisplayModelNumber(id)):\(CGDisplaySerialNumber(id))"
+        DisplayGammaCompositor.fingerprint(id)
     }
 
     /// A remembered level, only if it was saved for the monitor currently
@@ -595,12 +574,9 @@ final class BrightnessService: ObservableObject {
                 }
                 // A software-dimmed screen should return with its clean gamma
                 // before the saved dim level is reapplied by the rebuild. The
-                // number may already belong to another monitor (see `GammaTable`).
-                if let baseline = self.gammaBaselines[display.id],
-                   baseline.fingerprint == Self.displayFingerprint(display.id) {
-                    CGSetDisplayTransferByTable(display.id, baseline.count, baseline.red,
-                                                baseline.green, baseline.blue)
-                }
+                // number may already belong to another monitor, which the
+                // compositor checks.
+                self.gamma.writeBaseline(display.id)
             }
 
             // The gamma curve above is work-queue state; the reconfiguration
@@ -828,17 +804,11 @@ final class BrightnessService: ObservableObject {
         }
     }
 
-    /// Writes every remembered curve back, skipping any display number that
-    /// now belongs to a different monitor. Runs on the work queue.
+    /// Lifts every software dim, skipping any display number that now
+    /// belongs to a different monitor. The colour filter, which shares the
+    /// curves, stays on. Runs on the work queue.
     private func restoreAllGamma() {
-        for (id, baseline) in gammaBaselines
-        where Self.displayFingerprint(id) == baseline.fingerprint {
-            CGSetDisplayTransferByTable(id, baseline.count, baseline.red,
-                                        baseline.green, baseline.blue)
-            Self.log.log("restored gamma baseline for display \(id)")
-        }
-        gammaBaselines = [:]
-        dimmedDisplays = []
+        gamma.clearDims()
     }
 
     // MARK: - Displays switched off by this app
@@ -1722,18 +1692,15 @@ final class BrightnessService: ObservableObject {
         // would force a fresh reading from a screen that is still dimmed, so
         // curves are kept across the gap and only trimmed once far more have
         // piled up than any desk has monitors.
-        if gammaBaselines.count > Self.rememberedGammaBaselines {
-            gammaBaselines = gammaBaselines.filter { seenTopology.contains($0.key) }
-        }
+        gamma.trimBaselines(keeping: seenTopology)
         for index in softwareIndices.sorted() {
             let id = built[index].id
             stateLock.lock()
             var value = BrightnessSupport.softwareDimToRestore(
                 remembered: rememberedLevel(for: id),
-                appliedByApp: dimmedDisplays.contains(id))
+                appliedByApp: gamma.isDimmed(id))
             stateLock.unlock()
-            captureGammaBaselineIfNeeded(id)
-            guard gammaBaselines[id] != nil else { continue }
+            guard gamma.captureBaselineIfNeeded(id) else { continue }
             // A display that was not here a moment ago may have been
             // replugged precisely to recover a black picture, so the saved
             // dim returns floored to a visible level (issue #301).
@@ -1885,52 +1852,9 @@ final class BrightnessService: ObservableObject {
 
     // MARK: - Software dimming (work queue)
 
-    /// Remembers the display's untouched curve, once. While a dim is applied
-    /// the live table is a scaled copy of it, and after a reconnection there
-    /// is no way to tell a scaled copy from the real thing.
-    private func captureGammaBaselineIfNeeded(_ id: CGDirectDisplayID) {
-        let fingerprint = Self.displayFingerprint(id)
-        // A curve is only read while the screen is still showing its own. Once
-        // a dim is applied the live curve is a scaled copy, and reading that
-        // back would take the dim as the new normal and darken the screen
-        // again on every reconnection until it is black. A display this app is
-        // not dimming is read again, so a colour profile the user changes, or
-        // a warm evening tint, becomes what everything else scales from.
-        if gammaBaselines[id]?.fingerprint == fingerprint, dimmedDisplays.contains(id) { return }
-        let capacity = 256
-        var red = [CGGammaValue](repeating: 0, count: capacity)
-        var green = [CGGammaValue](repeating: 0, count: capacity)
-        var blue = [CGGammaValue](repeating: 0, count: capacity)
-        var sampleCount: UInt32 = 0
-        guard CGGetDisplayTransferByTable(id, UInt32(capacity), &red, &green, &blue,
-                                          &sampleCount) == .success,
-              sampleCount > 0 else { return }
-        let count = Int(min(sampleCount, UInt32(capacity)))
-        gammaBaselines[id] = GammaTable(red: Array(red.prefix(count)),
-                                        green: Array(green.prefix(count)),
-                                        blue: Array(blue.prefix(count)),
-                                        count: UInt32(count),
-                                        fingerprint: fingerprint)
-        Self.log.log("captured gamma baseline for display \(id) [\(fingerprint, privacy: .public)], peak \(red[count - 1])")
-    }
-
     @discardableResult
     private func applySoftwareDim(_ id: CGDirectDisplayID, value: Double) -> Bool {
-        guard let baseline = gammaBaselines[id],
-              baseline.fingerprint == Self.displayFingerprint(id) else { return false }
-        if value >= 0.999 {
-            let restored = CGSetDisplayTransferByTable(id, baseline.count, baseline.red,
-                                                       baseline.green, baseline.blue) == .success
-            if restored { dimmedDisplays.remove(id) }
-            return restored
-        }
-        let factor = BrightnessSupport.softwareDimFactor(for: value)
-        let red = BrightnessSupport.scaledGammaTable(baseline.red, factor: factor)
-        let green = BrightnessSupport.scaledGammaTable(baseline.green, factor: factor)
-        let blue = BrightnessSupport.scaledGammaTable(baseline.blue, factor: factor)
-        let applied = CGSetDisplayTransferByTable(id, baseline.count, red, green, blue) == .success
-        if applied { dimmedDisplays.insert(id) }
-        return applied
+        gamma.setDim(value, for: id)
     }
 
     // MARK: - DDC transactions (work queue)

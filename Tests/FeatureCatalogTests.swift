@@ -271,7 +271,7 @@ enum FeatureCatalogTests {
 
         // MARK: Features hub catalog
 
-        suite.expect(AppFeature.allCases.count == 69, "feature catalog has 69 features")
+        suite.expect(AppFeature.allCases.count == 70, "feature catalog has 70 features")
         suite.expect(Set(AppFeature.allCases.map(\.rawValue)).count == AppFeature.allCases.count,
                "feature ids are unique")
         suite.expect(AppFeature.allCases.map(\.rawValue) == [
@@ -281,7 +281,7 @@ enum FeatureCatalogTests {
             "clipboardHistory", "pastePlain", "finderCutPaste", "finderRename", "shelf", "urlCleaner",
             "diskImageInstaller",
             "mixer", "soundOutputSwitcher", "micMute", "musicBlock",
-            "keepAwake", "brightness", "extraBrightness", "bluetoothSleep",
+            "keepAwake", "brightness", "extraBrightness", "bluetoothSleep", "displayColor",
             "quickLauncher", "quickToggles", "colorPicker", "screenOCR", "cleaningMode", "mediaTools",
             "cleaner", "uninstaller", "homebrew", "appUpdates", "screenshot", "cameraPreview",
             "radialMenu", "scratchpad", "commandBar", "screenRecorder", "killProcess", "portManager", "notch", "notchCalendar", "notchNotifications", "notchGestures", "notchTimer", "notchAccessories", "notchLyrics", "notchQueue", "notchLiveEqualizer", "notchDownloads",
@@ -1568,8 +1568,9 @@ enum FeatureCatalogTests {
                "the mouse page hides only with all eight mouse features off")
         suite.expect(!pageVisible(.energy, available: allFeatures.subtracting([.keepAwake, .brightness,
                                                                          .extraBrightness,
-                                                                         .bluetoothSleep])),
-               "energy hides when all four of its features are off")
+                                                                         .bluetoothSleep,
+                                                                         .displayColor])),
+               "energy hides when all five of its features are off")
         suite.expect(pageVisible(.energy, available: [.extraBrightness]), "XDR alone keeps the energy page")
         suite.expect(pageVisible(.energy, available: [.brightness]),
                "brightness control alone keeps the energy page")
@@ -1790,8 +1791,24 @@ enum FeatureCatalogTests {
                "the brightness work queue resolves display names without touching NSScreen")
         // Display numbers are reissued after a reconnection, so the gamma
         // restore before a switch-off must check the monitor like the others.
-        suite.expect(brightnessSource.contains("baseline.fingerprint == Self.displayFingerprint(display.id)"),
+        let compositorSource = (try? String(
+            contentsOfFile: "Sources/Vorssaint/Services/Display/DisplayGammaCompositor.swift",
+            encoding: .utf8)) ?? ""
+        let writeBaselineBody = compositorSource
+            .components(separatedBy: "func writeBaseline(").dropFirst().first?
+            .components(separatedBy: "\n    }\n").first ?? ""
+        suite.expect(brightnessSource.contains("gamma.writeBaseline(display.id)")
+                && writeBaselineBody.contains("baseline.fingerprint == Self.fingerprint(id)"),
                "the pre-switch-off gamma restore checks the display fingerprint")
+        // Software dimming and the colour filter share one curve; a second
+        // writer starting from the clean curve would undo the other on every
+        // write, so nothing outside the compositor sets a transfer table.
+        let gammaWriters = ["BrightnessService.swift", "DisplayColorService.swift"].filter { name in
+            ((try? String(contentsOfFile: "Sources/Vorssaint/Services/Display/\(name)",
+                          encoding: .utf8)) ?? "").contains("CGSetDisplayTransferByTable")
+        }
+        suite.expect(gammaWriters.isEmpty && compositorSource.contains("CGSetDisplayTransferByTable"),
+               "only the gamma compositor writes display transfer tables")
 
         let ddcWrite = BrightnessSupport.writePacket(code: 0x10, value: 0x1234)
         let expectedDDCWrite: [UInt8] = [0x84, 0x03, 0x10, 0x12, 0x34, 0x8E]

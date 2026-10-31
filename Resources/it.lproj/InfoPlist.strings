@@ -22,3 +22,7 @@
 "NSNetworkVolumesUsageDescription" = "Vorssaint organizza i download WhatsApp confermati in una cartella di destinazione scelta esplicitamente da te.";
 "NSRemovableVolumesUsageDescription" = "Vorssaint organizza i download WhatsApp confermati in una cartella di destinazione scelta esplicitamente da te.";
 "NSCalendarsFullAccessUsageDescription" = "Mostra i tuoi prossimi appuntamenti nella parte superiore dello schermo. Gli eventi del calendario restano su questo Mac.";
+
+/* macOS Location permission prompt. */
+"NSLocationUsageDescription" = "Vorssaint usa la tua posizione approssimativa solo per calcolare alba e tramonto per il filtro colore dello schermo. Nulla lascia il tuo Mac.";
+"NSLocationWhenInUseUsageDescription" = "Vorssaint usa la tua posizione approssimativa solo per calcolare alba e tramonto per il filtro colore dello schermo. Nulla lascia il tuo Mac.";

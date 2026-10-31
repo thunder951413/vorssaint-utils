@@ -852,6 +852,7 @@ extension AppFeature {
         case .brightness: return FeatureStrings.brightness(L10n.shared.language).pageTitle
         case .extraBrightness: return s.extraBrightnessName
         case .bluetoothSleep: return FeatureStrings.bluetoothSleep(L10n.shared.language).pageTitle
+        case .displayColor: return FeatureStrings.displayColor(L10n.shared.language).title
         case .quickLauncher: return s.launcherName
         case .quickToggles: return FeatureStrings.quickToggles(L10n.shared.language).pageTitle
         case .colorPicker: return s.colorPickerName
@@ -928,6 +929,7 @@ extension AppFeature {
         case .brightness: return FeatureStrings.brightness(L10n.shared.language).hubDescription
         case .extraBrightness: return hub.descExtraBrightness
         case .bluetoothSleep: return FeatureStrings.bluetoothSleep(L10n.shared.language).hubDescription
+        case .displayColor: return FeatureStrings.displayColor(L10n.shared.language).hubDescription
         case .quickLauncher: return hub.descQuickLauncher
         case .quickToggles: return FeatureStrings.quickToggles(L10n.shared.language).hubDescription
         case .colorPicker: return hub.descColorPicker

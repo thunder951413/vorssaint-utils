@@ -56,6 +56,7 @@ struct MetricsTests {
             }),
             ("display-restoration", { DisplayRestorationTests.run(suite) }),
             ("software-dimming", { SoftwareDimmingRouteTests.run { suite.expect($0, $1) } }),
+            ("display-color", { DisplayColorTests.run(suite) }),
             ("capture", { ScreenshotSelectionRefreshContract.run(suite) }),
             ("keyboard", {
                 KeyboardFeatureTests.run(suite)

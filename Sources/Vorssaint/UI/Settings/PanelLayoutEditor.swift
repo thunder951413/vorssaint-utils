@@ -122,6 +122,7 @@ private extension PanelSectionID {
         switch self {
         case .keepAwake: return text.sectionKeepAwake
         case .brightness: return text.sectionDisplays
+        case .displayColor: return FeatureStrings.displayColor(L10n.shared.language).hubDescription
         case .mixer: return text.sectionMixer
         case .system: return text.sectionSystem
         case .network: return text.sectionNetwork
