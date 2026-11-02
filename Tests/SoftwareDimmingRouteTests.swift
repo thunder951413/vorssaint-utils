@@ -106,7 +106,7 @@ enum SoftwareDimmingRouteTests {
         let row = Context.Row()
         expect(row.offered, "a monitor whose channel takes writes and answers no reads is offered the choice")
         row.display.readable = true
-        expect(!row.offered, "a monitor whose channel answers reads is left on DDC without asking")
+        expect(row.offered, "a monitor whose channel answers reads keeps the choice too")
         row.display.readable = false
         row.display.isBuiltIn = true
         expect(!row.offered, "the built-in display never routes over DDC, so it is never asked about")

@@ -216,10 +216,12 @@ private struct ExtraBrightnessPanelToggle: View {
 /// slider is just as dead on the Energy page as in the panel, so the way out
 /// has to be there too.
 ///
-/// Offered only where the routing is genuinely ambiguous: a channel that takes
-/// writes and answers no reads either drives the panel or swallows everything,
-/// and the bus cannot tell which (issue #1589). Stays visible once chosen, or
-/// there would be no way back to DDC.
+/// Offered on every monitor driven over DDC, not only where the routing is
+/// ambiguous (a channel that takes writes and answers no reads, issue #1589):
+/// a channel that answers one probe can still go quiet on the next, and a
+/// control that vanishes once a probe succeeds leaves no way back. Gamma
+/// dimming is also the only way below the monitor's own minimum. Stays
+/// visible once chosen, or there would be no way back to DDC.
 struct SoftwareDimmingButton: View {
     @ObservedObject private var l10n = L10n.shared
     @ObservedObject private var service = BrightnessService.shared
@@ -232,7 +234,7 @@ struct SoftwareDimmingButton: View {
     private var offered: Bool {
         guard display.isActive, !display.isBuiltIn else { return false }
         if chosen { return true }
-        return display.method == .ddc && !display.readable
+        return display.method == .ddc
     }
 
     var body: some View {
