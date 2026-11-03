@@ -9,7 +9,9 @@
 set -euo pipefail
 umask 077
 
-if [[ -z "${SIGNING_CERT_P12:-}" || -z "${SIGNING_CERT_PASSWORD:-}" ]]; then
+# The password may be empty: a certificate exported without one imports
+# with an empty -P.
+if [[ -z "${SIGNING_CERT_P12:-}" ]]; then
     if [[ "${REQUIRE_SIGNING:-0}" == "1" ]]; then
         echo "Release signing credentials are incomplete." >&2
         exit 1
