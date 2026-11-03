@@ -27,7 +27,7 @@ final class UpdateService: ObservableObject {
     /// preview. Set alongside `.available`; cleared otherwise.
     @Published private(set) var availableNotes: String?
 
-    private let repository = "vorssaint/vorssaint-utils"
+    private let repository = "thunder951413/vorssaint-utils"
     private var downloadURL: URL?
     /// Size the release advertises for the asset, used to bound the download.
     private var downloadExpectedBytes: Int64?
@@ -358,7 +358,8 @@ final class UpdateService: ObservableObject {
             // app's session and launchd job, before the swap it is here for.
             try DetachedProcess.spawn("/bin/sh",
                                       [scriptURL.path, appPath, dmgPath, "\(pid)", resultPath,
-                                       "\(getuid())", expectedVersion])
+                                       "\(getuid())", expectedVersion,
+                                       FanControlIdentifiers.signingTeamID ?? ""])
         } catch {
             try? FileManager.default.removeItem(at: scriptURL)
             failInstall(dmgPath: dmgPath, message: error.localizedDescription)
@@ -383,7 +384,8 @@ final class UpdateService: ObservableObject {
                                                                     pid: pid,
                                                                     resultPath: resultPath,
                                                                     uid: getuid(),
-                                                                    expectedVersion: expectedVersion)
+                                                                    expectedVersion: expectedVersion,
+                                                                    teamID: FanControlIdentifiers.signingTeamID ?? "")
         AdminShell.runInProcess(command, prompt: L10n.shared.s.adminPromptUpdate) { [weak self] granted in
             DispatchQueue.main.async {
                 guard let self else { return }

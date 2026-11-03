@@ -22,11 +22,12 @@ enum UpdateInstallerSupport {
     /// Arguments: $1 app path, $2 dmg path, $3 pid to wait for,
     /// $4 result marker path, $5 uid to relaunch as (used when running as
     /// root, where a plain `open` could launch the app as root), $6 expected
-    /// version from the trusted release tag.
+    /// version from the trusted release tag, $7 the Apple team that signed
+    /// the running app: an update must come from the same signer.
     static func installerScript() -> String {
         """
         #!/bin/sh
-        APP="$1"; DMG="$2"; PID="$3"; RESULT="$4"; ASUSER="$5"; EXPECTED_VERSION="$6"
+        APP="$1"; DMG="$2"; PID="$3"; RESULT="$4"; ASUSER="$5"; EXPECTED_VERSION="$6"; TEAM="$7"
         SCRIPT="$0"
         # Write-ahead markers go to a progress file; only a FINISHED run
         # promotes it to the real marker. The app may relaunch while this
@@ -63,8 +64,11 @@ enum UpdateInstallerSupport {
         }
         while kill -0 "$PID" 2>/dev/null; do sleep 0.3; done
         note fail-dmg-verify
-        DMG_VERIFY_REQ='anchor apple generic and certificate leaf[subject.OU] = "3D485NHW29"'
-        if ! /usr/bin/codesign -v --strict -R="$DMG_VERIFY_REQ" "$DMG" 2>/dev/null; then
+        # No team (an ad-hoc build) or a malformed one installs nothing.
+        case "$TEAM" in ''|*[!A-Za-z0-9]*) TEAM_OK=0;; *) TEAM_OK=1;; esac
+        DMG_VERIFY_REQ="anchor apple generic and certificate leaf[subject.OU] = \\"$TEAM\\""
+        if [ "$TEAM_OK" != 1 ] \
+            || ! /usr/bin/codesign -v --strict -R="$DMG_VERIFY_REQ" "$DMG" 2>/dev/null; then
             /bin/rm -f "$DMG"
             finalize
             relaunch "$APP"
@@ -112,13 +116,18 @@ enum UpdateInstallerSupport {
                     # When the user disabled Gatekeeper, spctl cannot assess anything
                     # and rejects even a healthy bundle; the codesign identity check
                     # below stays as the gate in that case.
+                    # Only notarized Developer ID releases pass Gatekeeper; a
+                    # build signed by another team (a fork's own certificate)
+                    # is held to the signer check below alone.
                     GATEKEEPER_OK=0
-                    if /usr/sbin/spctl --status 2>/dev/null | /usr/bin/grep -q disabled; then
+                    if [ "$TEAM" != "\(upstreamTeamID)" ]; then
+                        GATEKEEPER_OK=1
+                    elif /usr/sbin/spctl --status 2>/dev/null | /usr/bin/grep -q disabled; then
                         GATEKEEPER_OK=1
                     elif /usr/sbin/spctl -a -t exec "$STAGE" >/dev/null 2>&1; then
                         GATEKEEPER_OK=1
                     fi
-                    VERIFY_REQ='identifier "com.vorssaint.utils" and anchor apple generic and certificate leaf[subject.OU] = "3D485NHW29"'
+                    VERIFY_REQ="identifier \\"com.vorssaint.utils\\" and anchor apple generic and certificate leaf[subject.OU] = \\"$TEAM\\""
                     note fail-verify
                     if /usr/bin/codesign -v --deep --strict -R="$VERIFY_REQ" "$STAGE" 2>/dev/null \
                         && [ "$GATEKEEPER_OK" = 1 ]; then
@@ -163,6 +172,9 @@ enum UpdateInstallerSupport {
         """
     }
 
+    /// The team behind the original project's notarized releases.
+    static let upstreamTeamID = "3D485NHW29"
+
     /// Single-quotes a string for POSIX sh, closing and reopening the quote
     /// around every embedded single quote (same scheme as
     /// HomebrewSupport.shellQuote, minus its bare-word fast path).
@@ -180,9 +192,10 @@ enum UpdateInstallerSupport {
                                        pid: Int32,
                                        resultPath: String,
                                        uid: uid_t,
-                                       expectedVersion: String) -> String {
+                                       expectedVersion: String,
+                                       teamID: String) -> String {
         let script = shellSingleQuoted(installerScript())
-        let args = [appPath, dmgPath, "\(pid)", resultPath, "\(uid)", expectedVersion]
+        let args = [appPath, dmgPath, "\(pid)", resultPath, "\(uid)", expectedVersion, teamID]
             .map(shellSingleQuoted)
             .joined(separator: " ")
         return DetachedProcess.detachedShellCommand(

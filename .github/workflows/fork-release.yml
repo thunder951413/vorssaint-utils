@@ -1,0 +1,104 @@
+name: Fork Release
+
+# Builds and publishes this fork's own releases. The upstream release workflow
+# only runs in vorssaint/vorssaint-utils with its Developer ID; here the app is
+# signed with the certificate in the SIGNING_CERT_P12 / SIGNING_CERT_PASSWORD
+# secrets, the same one used for local installs, so permissions and the fan
+# helper survive updates and the in-app updater accepts the result.
+on:
+  push:
+    tags: ["v[0-9]*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release, e.g. v3.4.0-beta.2.2"
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: fork-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build, sign & publish
+    if: github.repository == 'thunder951413/vorssaint-utils'
+    runs-on: macos-26
+    timeout-minutes: 40
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Check tag matches app version
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' Resources/Info.plist)"
+          if [[ "$APP_VERSION" != "$VERSION" ]]; then
+            echo "Tag $TAG does not match app version $APP_VERSION" >&2
+            exit 1
+          fi
+
+      - name: Unit tests
+        run: ./build.sh --test
+
+      - name: Set up signing
+        env:
+          REQUIRE_SIGNING: "1"
+          SIGNING_CERT_P12: ${{ secrets.SIGNING_CERT_P12 }}
+          SIGNING_CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+        run: ./Tools/ci-setup-signing.sh
+
+      - name: Build
+        run: ./build.sh
+
+      - name: Verify signer
+        run: |
+          set -euo pipefail
+          TEAM="$(codesign -dv build/stage/Vorssaint.app 2>&1 | sed -n 's/^TeamIdentifier=//p')"
+          if [[ -z "$TEAM" || "$TEAM" == "not set" ]]; then
+            echo "The app was not signed with a team certificate; updates would be refused" >&2
+            exit 1
+          fi
+          echo "Signed by team $TEAM"
+          codesign --verify --deep --strict build/stage/Vorssaint.app
+
+      - name: Selftest
+        run: ./build/stage/Vorssaint.app/Contents/MacOS/Vorssaint --selftest
+
+      - name: Package DMG
+        run: ./Tools/make-dmg.sh
+
+      - name: Sign DMG
+        run: |
+          set -euo pipefail
+          IDENTITY="$(security find-identity -v -p codesigning \
+            | sed -nE 's/.*"((Developer ID Application|Apple Development):.*)"/\1/p' | head -1)"
+          DMG="$(ls dist/*.dmg | head -1)"
+          codesign --force --timestamp --sign "$IDENTITY" "$DMG"
+          codesign --verify --strict "$DMG"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ARGS=("$TAG" dist/*.dmg --verify-tag --title "$TAG" --generate-notes)
+          if [[ "$TAG" =~ -(beta|rc|alpha) ]]; then
+            ARGS+=(--prerelease)
+          else
+            ARGS+=(--latest)
+          fi
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/*.dmg --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "${ARGS[@]}" --repo "$GITHUB_REPOSITORY"
+          fi

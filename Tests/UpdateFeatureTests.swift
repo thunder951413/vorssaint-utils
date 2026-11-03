@@ -798,6 +798,11 @@ enum UpdateFeatureTests {
         suite.expect(dmgVerification != nil && dmgMount != nil
                && dmgVerification!.lowerBound < dmgMount!.lowerBound,
                "installer verifies the release signer before mounting the DMG")
+        suite.expect(installerScript.contains("TEAM=\"$7\"")
+               && installerScript.contains("*[!A-Za-z0-9]*) TEAM_OK=0")
+               && installerScript.contains("certificate leaf[subject.OU] = \\\"$TEAM\\\"")
+               && !installerScript.contains("subject.OU] = \"3D485NHW29\""),
+               "installer accepts only updates signed by the running app's own team")
         suite.expect(installerScript.contains("BUNDLE_VERSION=")
                && installerScript.contains("\"$BUNDLE_VERSION\" = \"$EXPECTED_VERSION\""),
                "installer requires the signed app to match the offered release version")
@@ -822,7 +827,8 @@ enum UpdateFeatureTests {
             pid: 123,
             resultPath: "/tmp/result",
             uid: 501,
-            expectedVersion: "3.3.3")
+            expectedVersion: "3.3.3",
+            teamID: "ABCDE12345")
         suite.expect(elevated.contains("POSIX::setsid()") && elevated.hasSuffix("&"),
                "elevated installer leaves this app's session so it outlives the app it replaces")
         suite.expect(elevated.contains("nohup"),
