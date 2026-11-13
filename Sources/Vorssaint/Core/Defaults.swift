@@ -505,6 +505,19 @@ enum DefaultsKey {
     static let clipboardAutoClearOnSleep = "clipboardAutoClearOnSleep"
     static let clipboardAutoClearOnDisplaySleep = "clipboardAutoClearOnDisplaySleep"
     static let clipboardAutoClearOnScreenLock = "clipboardAutoClearOnScreenLock"
+    // YTools YTCE2 Jianguoyun E2EE clipboard cloud sync
+    static let clipboardCloudSyncEnabled = "clipboardCloudSyncEnabled"
+    static let clipboardCloudSyncFolder = "clipboardCloudSyncFolder"
+    static let clipboardCloudSyncPropagateDeletes = "clipboardCloudSyncPropagateDeletes"
+    // mac_gesture Trackpad Multi-Touch Gestures & Chord Key Remaps
+    static let trackpadGesturesEnabled = "trackpadGesturesEnabled"
+    static let trackpadChordRemapEnabled = "trackpadChordRemapEnabled"
+    static let trackpadGestureRulesJSON = "trackpadGestureRulesJSON"
+    static let trackpadChordRulesJSON = "trackpadChordRulesJSON"
+    static let trackpadGestureDebounceMs = "trackpadGestureDebounceMs"
+    static let trackpadGestureDiagonalRejectRatio = "trackpadGestureDiagonalRejectRatio"
+    static let trackpadGestureDownBiasRatio = "trackpadGestureDownBiasRatio"
+    static let trackpadGestureLegacyImported = "trackpadGestureLegacyImported"
 
     static let windowPreviewExcludedApps = "windowPreviewExcludedApps" // pause thumbnail capture while these apps are in front
     static let diskEjectExcludedVolumes = "diskEjectExcludedVolumes" // volume names/UUIDs excluded from Eject all disks
@@ -546,6 +559,13 @@ enum DefaultsKey {
     // the bar looks for no files at all, which is the setting out of the box.
     static let commandBarFileScopes = "commandBarFileScopes"
     static let commandBarFileIgnores = "commandBarFileIgnores" // names a file search never shows
+    // YTools Command Bar extensions
+    static let commandBarDictionaryEnabled = "commandBarDictionaryEnabled"
+    static let commandBarDictionaryAutoEnabled = "commandBarDictionaryAutoEnabled"
+    static let commandBarSpellEnabled = "commandBarSpellEnabled"
+    static let commandBarDirectoryNavEnabled = "commandBarDirectoryNavEnabled"
+    static let commandBarPinyinFilesEnabled = "commandBarPinyinFilesEnabled"
+    static let commandBarLargeTypeEnabled = "commandBarLargeTypeEnabled"
     static let panelUtilityCommandBar = "panelUtilityCommandBar"
     static let scratchpadRetention = "scratchpadRetention"   // never | day | week | month
     static let scratchpadCloseOnClickOutside = "scratchpadCloseOnClickOutside"
@@ -1434,6 +1454,17 @@ enum Defaults {
         DefaultsKey.clipboardAutoClearOnSleep: false,
         DefaultsKey.clipboardAutoClearOnDisplaySleep: false,
         DefaultsKey.clipboardAutoClearOnScreenLock: false,
+        DefaultsKey.clipboardCloudSyncEnabled: false,
+        DefaultsKey.clipboardCloudSyncFolder: "YTools",
+        DefaultsKey.clipboardCloudSyncPropagateDeletes: true,
+        DefaultsKey.trackpadGesturesEnabled: false,
+        DefaultsKey.trackpadChordRemapEnabled: false,
+        DefaultsKey.trackpadGestureRulesJSON: "",
+        DefaultsKey.trackpadChordRulesJSON: "",
+        DefaultsKey.trackpadGestureDebounceMs: 150,
+        DefaultsKey.trackpadGestureDiagonalRejectRatio: 0.95,
+        DefaultsKey.trackpadGestureDownBiasRatio: 0.35,
+        DefaultsKey.trackpadGestureLegacyImported: false,
         DefaultsKey.finderCutPasteShowHUD: true,
         DefaultsKey.finderPasteImageAsFile: false,
         DefaultsKey.windowPreviewExcludedApps: [String](),
@@ -1460,7 +1491,7 @@ enum Defaults {
         DefaultsKey.scratchpadShortcutEnabled: false,
         DefaultsKey.scratchpadShortcut: GlobalShortcut.scratchpadDefault.storageValue,
         DefaultsKey.commandBarShortcutEnabled: false,
-        DefaultsKey.commandBarCompactMode: false,
+        DefaultsKey.commandBarCompactMode: true,
         DefaultsKey.commandBarASCIILayoutEnabled: false,
         DefaultsKey.commandBarDisabledSources: "",
         DefaultsKey.commandBarAliases: "",
@@ -1468,6 +1499,12 @@ enum Defaults {
         DefaultsKey.commandBarHidden: "",
         DefaultsKey.commandBarFileScopes: "",
         DefaultsKey.commandBarFileIgnores: "",
+        DefaultsKey.commandBarDictionaryEnabled: true,
+        DefaultsKey.commandBarDictionaryAutoEnabled: false,
+        DefaultsKey.commandBarSpellEnabled: true,
+        DefaultsKey.commandBarDirectoryNavEnabled: true,
+        DefaultsKey.commandBarPinyinFilesEnabled: true,
+        DefaultsKey.commandBarLargeTypeEnabled: true,
         DefaultsKey.commandBarShortcut: GlobalShortcut.commandBarDefault.storageValue,
         DefaultsKey.commandBarPositionOffset: "",
         DefaultsKey.commandBarEmojiSkinTone: "",

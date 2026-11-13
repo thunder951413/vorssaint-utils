@@ -7,6 +7,7 @@ struct ClipboardSettings: View {
     @ObservedObject private var l10n = L10n.shared
     @ObservedObject private var features = FeatureRuntime.shared
     @ObservedObject private var history = ClipboardHistoryService.shared
+    @ObservedObject private var cloudSync = ClipboardCloudSyncCoordinator.shared
     @ObservedObject private var pastePlain = PastePlainService.shared
     @ObservedObject private var permissions = Permissions.shared
     @AppStorage(DefaultsKey.pastePlainEnabled) private var pastePlainEnabled = false
@@ -26,6 +27,10 @@ struct ClipboardSettings: View {
     @AppStorage(DefaultsKey.clipboardAutoClearOnSleep) private var autoClearOnSleep = false
     @AppStorage(DefaultsKey.clipboardAutoClearOnDisplaySleep) private var autoClearOnDisplaySleep = false
     @AppStorage(DefaultsKey.clipboardAutoClearOnScreenLock) private var autoClearOnScreenLock = false
+    @AppStorage(DefaultsKey.clipboardCloudSyncEnabled) private var cloudSyncEnabled = false
+    @AppStorage(DefaultsKey.clipboardCloudSyncFolder) private var cloudSyncFolder = "YTools"
+    @AppStorage(DefaultsKey.clipboardCloudSyncPropagateDeletes) private var cloudSyncPropagateDeletes = true
+    @State private var showingCloudCredentialsSheet = false
 
     private var text: ClipboardFeatureStrings {
         FeatureStrings.clipboard(l10n.language)
@@ -84,6 +89,8 @@ struct ClipboardSettings: View {
                 Section {
                     Toggle(text.showInPanel, isOn: $showInPanel)
                 }
+
+                clipboardCloudSyncSection
 
                 clipboardAutoClearSection
             }
@@ -266,6 +273,72 @@ struct ClipboardSettings: View {
         return formatter
     }()
 
+    @ViewBuilder
+    private var clipboardCloudSyncSection: some View {
+        Section {
+            Toggle(YToolsStrings.syncEnableToggle, isOn: $cloudSyncEnabled)
+                .disabled(!enabled)
+                .onChange(of: cloudSyncEnabled) { _, _ in
+                    ClipboardCloudSyncCoordinator.shared.syncWithPreferences()
+                }
+            Text(YToolsStrings.syncCaption)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 8) {
+                Text(YToolsStrings.syncFolderLabel)
+                Spacer()
+                TextField(YToolsStrings.syncFolderPlaceholder, text: $cloudSyncFolder)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 160)
+                    .disabled(!enabled || !cloudSyncEnabled)
+            }
+
+            Toggle(YToolsStrings.syncPropagateDeletes, isOn: $cloudSyncPropagateDeletes)
+                .disabled(!enabled || !cloudSyncEnabled)
+            Text(YToolsStrings.syncPropagateDeletesCaption)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 10) {
+                Button(cloudSync.hasCredentials
+                       ? YToolsStrings.syncUpdateCredentials
+                       : YToolsStrings.syncConfigureCredentials) {
+                    showingCloudCredentialsSheet = true
+                }
+                .disabled(!enabled)
+
+                Button(YToolsStrings.syncNowButton) {
+                    cloudSync.syncNow()
+                }
+                .disabled(!enabled || !cloudSyncEnabled || !cloudSync.hasCredentials || cloudSync.isSyncing)
+
+                Spacer()
+
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(cloudSync.hasCredentials
+                         ? "\(YToolsStrings.syncCredentialsConfigured) · Device \(cloudSync.deviceShortID)"
+                         : YToolsStrings.syncCredentialsMissing)
+                        .font(.caption)
+                        .foregroundStyle(cloudSync.hasCredentials ? Color.secondary : Color.orange)
+                    Text(cloudSync.pendingUploads > 0
+                         ? "\(cloudSync.statusMessage) · \(cloudSync.pendingUploads) queued"
+                         : cloudSync.statusMessage)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        } header: {
+            Text(YToolsStrings.syncSectionTitle)
+        }
+        .sheet(isPresented: $showingCloudCredentialsSheet) {
+            ClipboardCloudCredentialsSheet(
+                initialUsername: cloudSync.accountEmail ?? "",
+                onDismiss: { showingCloudCredentialsSheet = false }
+            )
+        }
+    }
+
     private var clipboardStatsSection: some View {
             Section {
                 HStack {
@@ -288,5 +361,93 @@ struct ClipboardSettings: View {
                     .disabled(history.recentEntries.isEmpty)
                 }
             }
+    }
+}
+
+
+private struct ClipboardCloudCredentialsSheet: View {
+    @State var username: String
+    @State private var appPassword = ""
+    @State private var passphrase = ""
+    @State private var errorMessage: String?
+    let onDismiss: () -> Void
+
+    init(initialUsername: String, onDismiss: @escaping () -> Void) {
+        _username = State(initialValue: initialUsername)
+        self.onDismiss = onDismiss
+    }
+
+    private var canSave: Bool {
+        !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !appPassword.isEmpty
+            && passphrase.count >= 12
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(YToolsStrings.syncModalTitle)
+                .font(.system(size: 15, weight: .semibold))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(YToolsStrings.syncAccountLabel)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("you@example.com", text: $username)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(YToolsStrings.syncAppPasswordLabel)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                SecureField("Jianguoyun WebDAV app password", text: $appPassword)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(YToolsStrings.syncPassphraseLabel)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(passphrase.count)/12+ chars")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(passphrase.count >= 12 ? Color.secondary : Color.orange)
+                }
+                SecureField("Shared E2EE passphrase", text: $passphrase)
+                    .textFieldStyle(.roundedBorder)
+                Text(YToolsStrings.syncPassphraseHint)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+
+            HStack {
+                Spacer()
+                Button(YToolsStrings.syncCancelButton, action: onDismiss)
+                Button(YToolsStrings.syncSaveButton) {
+                    Task {
+                        if let err = await ClipboardCloudSyncCoordinator.shared.saveCredentials(
+                            username: username,
+                            appPassword: appPassword,
+                            syncPassphrase: passphrase
+                        ) {
+                            errorMessage = err
+                        } else {
+                            onDismiss()
+                        }
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!canSave)
+            }
+        }
+        .padding(20)
+        .frame(width: 440)
     }
 }

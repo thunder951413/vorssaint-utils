@@ -233,28 +233,17 @@ final class MiddleClickService: ObservableObject {
     /// registration and rebuild from the current device list.
     private func restartMultitouch() {
         guard tapStateLock.withLock({ tap }) != nil else { return }
-        stopMultitouch()
-        startMultitouch()
+        MultitouchDeviceHub.shared.restart()
     }
 
     private func startMultitouch() {
-        guard deviceList == nil, let list = Multitouch.deviceList() else { return }
-        deviceList = list
-        for index in 0..<CFArrayGetCount(list) {
-            guard let device = CFArrayGetValueAtIndex(list, index) else { continue }
-            Multitouch.register(UnsafeMutableRawPointer(mutating: device), middleClickContactCallback)
-            Multitouch.start(UnsafeMutableRawPointer(mutating: device))
+        MultitouchDeviceHub.shared.subscribe(id: "middleClick") { [weak self] touches, count, _ in
+            self?.contactFrame(fingerCount: count, touches: touches)
         }
     }
 
     private func stopMultitouch() {
-        guard let list = deviceList else { return }
-        for index in 0..<CFArrayGetCount(list) {
-            guard let device = CFArrayGetValueAtIndex(list, index) else { continue }
-            Multitouch.stop(UnsafeMutableRawPointer(mutating: device))
-            Multitouch.register(UnsafeMutableRawPointer(mutating: device), nil)
-        }
-        deviceList = nil
+        MultitouchDeviceHub.shared.unsubscribe(id: "middleClick")
     }
 
     private func installObservers() {

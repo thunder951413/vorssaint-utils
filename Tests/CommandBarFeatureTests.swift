@@ -215,7 +215,7 @@ enum CommandBarFeatureTests {
         suite.expect(!CommandBarHome.isCollapsed(compact: false, query: "",
                                            hasCategory: false, isPeeking: false),
                "the ordinary bar is never collapsed")
-        suite.expect(Defaults.registeredDefaults[DefaultsKey.commandBarCompactMode] as? Bool == false,
+        suite.expect(Defaults.registeredDefaults[DefaultsKey.commandBarCompactMode] as? Bool == true,
                "compact mode ships off: the browse list is how the bar introduces itself")
         suite.expect(SettingsBackupSupport.exportKeys().contains(DefaultsKey.commandBarCompactMode),
                "compact mode is configuration, so it travels with an exported setup")

@@ -878,7 +878,9 @@ enum CommandBarCatalog {
                 id: "file.\(path)",
                 title: url.lastPathComponent,
                 subtitle: folder,
-                keywords: bar.sourceFiles,
+                keywords: UserDefaults.standard.bool(forKey: DefaultsKey.commandBarPinyinFilesEnabled)
+                    ? bar.sourceFiles + " " + CommandBarSearch.pinyinKeywords(url.lastPathComponent)
+                    : bar.sourceFiles,
                 icon: .filePath(path),
                 countsUsage: false,
                 revealPath: path,
@@ -1751,5 +1753,60 @@ enum CommandBarCatalog {
             return match
         }
         return displays.first
+    }
+}
+
+
+extension CommandBarCatalog {
+    static func ytoolsDictionaryEntry(for query: String,
+                                      bar: CommandBarFeatureStrings) -> CommandBarEntry? {
+        guard UserDefaults.standard.bool(forKey: DefaultsKey.commandBarDictionaryEnabled),
+              let req = CommandBarDictionarySupport.parseDictionaryQuery(query) else {
+            return nil
+        }
+        let autoAllowed = UserDefaults.standard.bool(forKey: DefaultsKey.commandBarDictionaryAutoEnabled)
+        guard req.isExplicit || autoAllowed,
+              let fullText = CommandBarDictionarySupport.systemDefinition(for: req.word) else {
+            return nil
+        }
+        let summary = CommandBarDictionarySupport.condensedSummary(fullText)
+        return CommandBarEntry(
+            id: "ytools.dict.\(req.word.lowercased())",
+            title: req.word,
+            subtitle: "\(YToolsStrings.dictionarySubtitlePrefix) · \(summary)",
+            keywords: "define dict dictionary",
+            icon: .symbol("character.book.closed"),
+            isAnswer: req.isExplicit,
+            countsUsage: false,
+            run: { _ in
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(fullText, forType: .string)
+                QuickToolHUD.show(icon: "doc.on.doc", message: bar.copyHint)
+            }
+        )
+    }
+
+    static func ytoolsSpellEntries(for query: String,
+                                   bar: CommandBarFeatureStrings) -> [CommandBarEntry] {
+        guard UserDefaults.standard.bool(forKey: DefaultsKey.commandBarSpellEnabled),
+              let word = CommandBarDictionarySupport.parseSpellQuery(query) else {
+            return []
+        }
+        return CommandBarDictionarySupport.spellingSuggestions(for: word).map { guess in
+            CommandBarEntry(
+                id: "ytools.spell.\(guess.lowercased())",
+                title: guess,
+                subtitle: "\(YToolsStrings.spellSubtitlePrefix) · Copy suggestion",
+                keywords: "spell",
+                icon: .symbol("textformat.abc.dottedunderline"),
+                isAnswer: false,
+                countsUsage: false,
+                run: { _ in
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(guess, forType: .string)
+                    QuickToolHUD.show(icon: "checkmark", message: guess)
+                }
+            )
+        }
     }
 }

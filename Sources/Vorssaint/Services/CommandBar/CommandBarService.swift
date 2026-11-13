@@ -870,7 +870,7 @@ final class CommandBarService: ObservableObject {
     private var disabledCache: Set<CommandBarSource> = []
     private var usageCache: [String: CommandBarUse] = [:]
     /// Cached like the pins: read once per open, checked on every keystroke.
-    private var compactMode = false
+    private var compactMode = true
     /// The list was asked for anyway, through `peekHome()`. Cleared on the
     /// next open.
     private var isPeekingHome = false
@@ -1446,6 +1446,22 @@ final class CommandBarService: ObservableObject {
             return ranked.prefix(40).map { pool[$0] }
         }
 
+        // Interactive `/` and `~` directory browser ported from YTools.
+        if UserDefaults.standard.bool(forKey: DefaultsKey.commandBarDirectoryNavEnabled),
+           CommandBarDirectoryNav.parsePathQuery(trimmed) != nil {
+            scriptRunner.cancelPending()
+            fileSearch.cancelPending()
+            return CommandBarDirectoryNav.entries(for: trimmed) { [weak self] nextPath in
+                self?.query = nextPath
+            }
+        }
+        if let spellWord = CommandBarDictionarySupport.parseSpellQuery(trimmed), !spellWord.isEmpty,
+           UserDefaults.standard.bool(forKey: DefaultsKey.commandBarSpellEnabled) {
+            scriptRunner.cancelPending()
+            fileSearch.cancelPending()
+            return CommandBarCatalog.ytoolsSpellEntries(for: trimmed, bar: bar)
+        }
+
         // Emoji are a catalog of more than a thousand rows, so they only join
         // a search when the leading colon explicitly asks for them. Selecting
         // the Emoji category takes the path above and remains colon-free.
@@ -1650,8 +1666,10 @@ final class CommandBarService: ObservableObject {
         let firstToken = foldedQuery.split(separator: " ").first.map(String.init) ?? ""
 
         var counts: [String: Int] = [:]
+        let dictEntry = CommandBarCatalog.ytoolsDictionaryEntry(for: trimmed, bar: bar)
         var result: [CommandBarEntry] = []
         if let answer { result.append(answer) }
+        if let dictEntry, dictEntry.isAnswer { result.append(dictEntry) }
         if let openURL { result.append(openURL) }
         if let scriptAnswer { result.append(scriptAnswer) }
         for index in ranked {
@@ -1667,6 +1685,9 @@ final class CommandBarService: ObservableObject {
             }
             result.append(entry)
             if result.count >= 12 { break }
+        }
+        if let dictEntry, !dictEntry.isAnswer, result.count < 12 {
+            result.append(dictEntry)
         }
         return result
     }
@@ -1791,11 +1812,59 @@ final class CommandBarService: ObservableObject {
                 })
             }
         }
-        if entry.canRevealInFinder {
+        if entry.canRevealInFinder, let path = entry.revealPath {
             actions.append(RowAction(id: "reveal",
                                      title: bar.actionRevealInFinder,
                                      symbolName: "folder") { [weak self] in
                 self?.revealInFinder(entry)
+            })
+            if UserDefaults.standard.bool(forKey: DefaultsKey.commandBarDirectoryNavEnabled) {
+                actions.append(RowAction(id: "ytools.safeCopy",
+                                         title: YToolsStrings.actionCopyToFolder,
+                                         symbolName: "doc.on.doc") { [weak self] in
+                    self?.hide()
+                    Task { @MainActor in
+                        SafeFileTransferCoordinator.shared.chooseDestinationAndTransfer(sources: [path], move: false)
+                    }
+                })
+                actions.append(RowAction(id: "ytools.safeMove",
+                                         title: YToolsStrings.actionMoveToFolder,
+                                         symbolName: "folder.badge.gearshape") { [weak self] in
+                    self?.hide()
+                    Task { @MainActor in
+                        SafeFileTransferCoordinator.shared.chooseDestinationAndTransfer(sources: [path], move: true)
+                    }
+                })
+                actions.append(RowAction(id: "ytools.bufferAdd",
+                                         title: YToolsStrings.actionBufferAdd,
+                                         symbolName: "tray.and.arrow.down") { [weak self] in
+                    SafeFileTransferCoordinator.shared.addToBuffer(path)
+                    self?.leaveActions()
+                })
+                let buffered = SafeFileTransferCoordinator.shared.bufferedPaths
+                if !buffered.isEmpty {
+                    actions.append(RowAction(id: "ytools.bufferCopyAll",
+                                             title: "\(YToolsStrings.actionBufferCopyAll) (\(buffered.count))",
+                                             symbolName: "square.and.arrow.down.on.square") { [weak self] in
+                        self?.hide()
+                        Task { @MainActor in
+                            SafeFileTransferCoordinator.shared.chooseDestinationAndTransfer(sources: buffered, move: false)
+                        }
+                    })
+                    actions.append(RowAction(id: "ytools.bufferClear",
+                                             title: YToolsStrings.actionBufferClear,
+                                             symbolName: "trash") { [weak self] in
+                        SafeFileTransferCoordinator.shared.clearBuffer()
+                        self?.leaveActions()
+                    })
+                }
+            }
+        }
+        if UserDefaults.standard.bool(forKey: DefaultsKey.commandBarLargeTypeEnabled) {
+            actions.append(RowAction(id: "ytools.largeType",
+                                     title: "\(YToolsStrings.actionLargeType) (⌘L)",
+                                     symbolName: "textformat.size.larger") { [weak self] in
+                self?.showLargeTypeForSelection()
             })
         }
         if let process = killProcessEntry(for: entry), !process.isProtected {
@@ -3078,6 +3147,11 @@ final class CommandBarService: ObservableObject {
                 case "k":
                     self.openActions()
                     return nil
+                case "l":
+                    if UserDefaults.standard.bool(forKey: DefaultsKey.commandBarLargeTypeEnabled) {
+                        self.showLargeTypeForSelection()
+                        return nil
+                    }
                 case "p":
                     if let entry = self.selectedEntry, !entry.isAnswer,
                        CommandBarPreferences.acceptsPin(rowID: entry.id) {
@@ -3258,6 +3332,28 @@ final class CommandBarService: ObservableObject {
         case kVK_ANSI_8: return 7
         case kVK_ANSI_9: return 8
         default: return nil
+        }
+    }
+}
+
+
+extension CommandBarService {
+    func showLargeTypeForSelection() {
+        let bannerText: String
+        if let entry = selectedEntry {
+            if let answer = entry.answerValue, !answer.isEmpty {
+                bannerText = answer
+            } else if entry.id.hasPrefix("ytools.dict.") {
+                bannerText = entry.subtitle
+            } else {
+                bannerText = entry.title
+            }
+        } else {
+            bannerText = query
+        }
+        hide()
+        Task { @MainActor in
+            LargeTypeWindowController.shared.show(text: bannerText)
         }
     }
 }

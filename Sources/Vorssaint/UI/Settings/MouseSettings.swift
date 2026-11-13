@@ -13,6 +13,7 @@ struct MouseSettings: View {
     @ObservedObject private var smoothScroll = SmoothScrollService.shared
     @ObservedObject private var mouseNavigation = MouseNavigationService.shared
     @ObservedObject private var middleClick = MiddleClickService.shared
+    @ObservedObject private var trackpadGestures = TrackpadGestureService.shared
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(DefaultsKey.scrollInverterEnabled) private var invertVertical = false
     @AppStorage(DefaultsKey.scrollInverterHorizontalEnabled) private var invertHorizontal = false
@@ -32,6 +33,12 @@ struct MouseSettings: View {
     @AppStorage(DefaultsKey.mouseSpacesGestureEnabled) private var spacesEnabled = false
     @AppStorage(DefaultsKey.middleClickEnabled) private var middleClickEnabled = false
     @AppStorage(DefaultsKey.middleClickTapFingers) private var middleClickTapFingers = 0
+    @AppStorage(DefaultsKey.trackpadGesturesEnabled) private var trackpadGesturesEnabled = false
+    @AppStorage(DefaultsKey.trackpadChordRemapEnabled) private var trackpadChordRemapEnabled = false
+    @AppStorage(DefaultsKey.trackpadGestureDebounceMs) private var trackpadGestureDebounceMs = 150
+    @AppStorage(DefaultsKey.trackpadGestureDownBiasRatio) private var trackpadGestureDownBiasRatio = 0.35
+    @AppStorage(DefaultsKey.trackpadGestureDiagonalRejectRatio) private var trackpadGestureDiagonalRejectRatio = 0.95
+    @State private var legacyImportFeedback: String?
     @AppStorage(DefaultsKey.mouseClickDebounceEnabled) private var mouseClickDebounceEnabled = false
     @AppStorage(DefaultsKey.mouseClickDebounceWindowMs) private var mouseClickDebounceWindow =
         Defaults.defaultMouseClickDebounceWindowMs
@@ -88,6 +95,7 @@ struct MouseSettings: View {
                     middleClickCard
                         .settingsSectionAnchor(.middleClick, cornerRadius: 16)
                 }
+                trackpadGesturesCard
                 if accessibilityNoteVisible {
                     SettingsCard(title: l10n.s.permissionRequired) {
                         PermissionRow(kind: .accessibility)
@@ -484,6 +492,221 @@ struct MouseSettings: View {
             .background(PanelMetricColor.green(for: colorScheme).opacity(0.12), in: Capsule())
     }
 
+    // MARK: - Trackpad Gestures & Chord Key Remaps (mac_gesture)
+
+    private var trackpadGesturesCard: some View {
+        SettingsCard(title: YToolsStrings.gestureCardTitle) {
+            SettingsRow(symbol: "hand.draw", title: YToolsStrings.gestureEnableTitle,
+                        caption: YToolsStrings.gestureEnableCaption) {
+                Toggle(YToolsStrings.gestureEnableTitle, isOn: $trackpadGesturesEnabled)
+                    .labelsHidden()
+                    .onChange(of: trackpadGesturesEnabled) { _, enabled in
+                        trackpadGestures.syncWithPreferences()
+                        if enabled { permissions.requestAccessibility() }
+                    }
+            }
+
+            if trackpadGesturesEnabled {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach($trackpadGestures.gestureRules) { $rule in
+                        HStack(spacing: 8) {
+                            Toggle("", isOn: $rule.isEnabled)
+                                .labelsHidden()
+                                .onChange(of: rule.isEnabled) { _, _ in trackpadGestures.saveRules() }
+
+                            TextField("Name", text: $rule.name)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 120)
+                                .onSubmit { trackpadGestures.saveRules() }
+
+                            Picker("", selection: $rule.fingers) {
+                                Text("2F").tag(2)
+                                Text("3F").tag(3)
+                                Text("4F").tag(4)
+                            }
+                            .labelsHidden()
+                            .frame(width: 62)
+                            .onChange(of: rule.fingers) { _, _ in trackpadGestures.saveRules() }
+
+                            Picker("", selection: $rule.direction) {
+                                ForEach(TrackpadGestureDirection.allCases) { dir in
+                                    Text(dir.displayTitle).tag(dir)
+                                }
+                            }
+                            .labelsHidden()
+                            .frame(width: 112)
+                            .onChange(of: rule.direction) { _, _ in trackpadGestures.saveRules() }
+
+                            Slider(value: $rule.minDistance, in: 0.08...0.45, step: 0.01) {
+                                EmptyView()
+                            }
+                            .frame(width: 80)
+                            .onChange(of: rule.minDistance) { _, _ in trackpadGestures.saveRules() }
+                            Text(String(format: "%.2f", rule.minDistance))
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .frame(width: 30, alignment: .trailing)
+
+                            TextField("cmd+w", text: Binding(
+                                get: { rule.keysDisplayString },
+                                set: {
+                                    rule.keys = TrackpadGestureKeyCodec.parseKeyList($0)
+                                    trackpadGestures.saveRules()
+                                }
+                            ))
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 11, design: .monospaced))
+                            .frame(width: 96)
+
+                            Button {
+                                trackpadGestures.gestureRules.removeAll { $0.id == rule.id }
+                                trackpadGestures.saveRules()
+                            } label: {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+
+                    HStack(spacing: 12) {
+                        Button {
+                            trackpadGestures.gestureRules.append(
+                                TrackpadGestureRule(name: "Custom Gesture", fingers: 3, direction: .down, minDistance: 0.18, keys: ["cmd", "w"])
+                            )
+                            trackpadGestures.saveRules()
+                        } label: {
+                            Label(YToolsStrings.gestureAddRuleButton, systemImage: "plus.circle")
+                                .font(.caption)
+                        }
+
+                        Text("Debounce: \(trackpadGestureDebounceMs) ms")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Stepper("", value: $trackpadGestureDebounceMs, in: 0...600, step: 25)
+                            .labelsHidden()
+                            .onChange(of: trackpadGestureDebounceMs) { _, _ in trackpadGestures.syncWithPreferences() }
+
+                        Text(String(format: "Down bias: %.2f", trackpadGestureDownBiasRatio))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Slider(value: $trackpadGestureDownBiasRatio, in: 0.15...0.75, step: 0.05)
+                            .frame(width: 80)
+                            .onChange(of: trackpadGestureDownBiasRatio) { _, _ in trackpadGestures.syncWithPreferences() }
+                    }
+
+                    if !trackpadGestures.lastTriggeredSummary.isEmpty {
+                        Text("Last triggered: \(trackpadGestures.lastTriggeredSummary)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.leading, settingsRowTextInset)
+            }
+
+            Divider()
+
+            SettingsRow(symbol: "keyboard.badge.ellipsis", title: YToolsStrings.chordRemapEnableTitle,
+                        caption: YToolsStrings.chordRemapEnableCaption) {
+                Toggle(YToolsStrings.chordRemapEnableTitle, isOn: $trackpadChordRemapEnabled)
+                    .labelsHidden()
+                    .onChange(of: trackpadChordRemapEnabled) { _, enabled in
+                        trackpadGestures.syncWithPreferences()
+                        if enabled { permissions.requestAccessibility() }
+                    }
+            }
+
+            if trackpadChordRemapEnabled {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach($trackpadGestures.chordRules) { $chord in
+                        HStack(spacing: 8) {
+                            Toggle("", isOn: $chord.isEnabled)
+                                .labelsHidden()
+                                .onChange(of: chord.isEnabled) { _, _ in trackpadGestures.saveRules() }
+
+                            TextField("Name", text: $chord.name)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 140)
+                                .onSubmit { trackpadGestures.saveRules() }
+
+                            TextField("cmd+h", text: Binding(
+                                get: { chord.whenDisplayString },
+                                set: {
+                                    chord.whenKeys = TrackpadGestureKeyCodec.parseKeyList($0)
+                                    trackpadGestures.saveRules()
+                                }
+                            ))
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 11, design: .monospaced))
+                            .frame(width: 110)
+
+                            Image(systemName: "arrow.right")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+
+                            TextField("left", text: Binding(
+                                get: { chord.sendDisplayString },
+                                set: {
+                                    chord.sendKeys = TrackpadGestureKeyCodec.parseKeyList($0)
+                                    trackpadGestures.saveRules()
+                                }
+                            ))
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 11, design: .monospaced))
+                            .frame(width: 110)
+
+                            Button {
+                                trackpadGestures.chordRules.removeAll { $0.id == chord.id }
+                                trackpadGestures.saveRules()
+                            } label: {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+
+                    Button {
+                        trackpadGestures.chordRules.append(
+                            ChordRemapRule(name: "Custom Remap", whenKeys: ["cmd", "j"], sendKeys: ["down"])
+                        )
+                        trackpadGestures.saveRules()
+                    } label: {
+                        Label(YToolsStrings.chordAddRuleButton, systemImage: "plus.circle")
+                            .font(.caption)
+                    }
+                }
+                .padding(.leading, settingsRowTextInset)
+            }
+
+            HStack(spacing: 10) {
+                Button(YToolsStrings.gestureImportLegacyButton) {
+                    if trackpadGestures.importLegacyConfigFromHome() {
+                        legacyImportFeedback = "Imported ~/.gesture/config.json"
+                    } else {
+                        legacyImportFeedback = "No ~/.gesture/config.json found"
+                    }
+                }
+                .font(.caption)
+
+                Button(YToolsStrings.gestureResetPresetsButton) {
+                    trackpadGestures.resetToPresets()
+                    legacyImportFeedback = "Presets restored"
+                }
+                .font(.caption)
+
+                if let legacyImportFeedback {
+                    Text(legacyImportFeedback)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.leading, settingsRowTextInset)
+        }
+    }
+
     // MARK: - State
 
     /// Only features that are on AND still available can ask for the
@@ -497,6 +720,8 @@ struct MouseSettings: View {
                 && AppFeature.mouseButtonShortcuts.isAvailable)
             || (mouseClickDebounceEnabled && AppFeature.mouseClickDebounce.isAvailable)
             || (middleClickEnabled && AppFeature.middleClick.isAvailable)
+            || trackpadGesturesEnabled
+            || trackpadChordRemapEnabled
         return anyEngaged && !permissions.accessibility
     }
 

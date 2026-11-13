@@ -107,6 +107,9 @@ final class ClipboardHistoryService: ObservableObject {
             stop()
             unregisterHotkey()
         }
+        Task { @MainActor in
+            ClipboardCloudSyncCoordinator.shared.syncWithPreferences()
+        }
     }
 
     /// Skips capturing pasteboard changes up to the given change count. Quick
@@ -307,6 +310,9 @@ final class ClipboardHistoryService: ObservableObject {
         selected.remove(entry.id)
         quickBatchEntryIDs = selected
         save()
+        Task { @MainActor in
+            ClipboardCloudSyncCoordinator.shared.recordLocalDelete([entry.id])
+        }
     }
 
     @discardableResult
@@ -330,9 +336,15 @@ final class ClipboardHistoryService: ObservableObject {
     }
 
     func clearRecent() {
+        let removedIDs = entries.filter { !$0.isPinned }.map(\.id)
         entries.removeAll { !$0.isPinned }
         pruneQuickBatchSelection()
         save()
+        if !removedIDs.isEmpty {
+            Task { @MainActor in
+                ClipboardCloudSyncCoordinator.shared.recordLocalDelete(removedIDs)
+            }
+        }
     }
 
     func clearAll() {
@@ -859,6 +871,72 @@ final class ClipboardHistoryService: ObservableObject {
         }
         latestPasteboardEntry = entry
         capturedEntry.send(entry)
+        Task { @MainActor in
+            ClipboardCloudSyncCoordinator.shared.recordLocalUpsert(entry)
+        }
+    }
+
+    @MainActor
+    func applyCloudEvents(_ events: [ClipboardCloudSyncActor.Event]) {
+        var didChange = false
+        for event in events {
+            switch event.kind {
+            case .delete:
+                let dead = Set(event.deletedIDs)
+                let before = entries.count
+                entries.removeAll { dead.contains($0.id) }
+                if entries.count != before { didChange = true }
+            case .upsert:
+                guard let record = event.item else { continue }
+                entries.removeAll { $0.id == record.id }
+                let pinnedDate = record.isPinned ? record.updatedAt : nil
+                let imported: ClipboardHistoryEntry?
+                switch record.kind {
+                case 0:
+                    guard let text = record.payload.first, !text.isEmpty else { continue }
+                    imported = ClipboardHistoryEntry(id: record.id,
+                                                     text: text,
+                                                     copiedAt: record.updatedAt,
+                                                     pinnedAt: pinnedDate)
+                case 1:
+                    guard !record.payload.isEmpty else { continue }
+                    imported = ClipboardHistoryEntry(id: record.id,
+                                                     text: "",
+                                                     copiedAt: record.updatedAt,
+                                                     pinnedAt: pinnedDate,
+                                                     kind: .files,
+                                                     filePaths: record.payload)
+                case 2:
+                    guard let png = record.binaryData,
+                          let rep = NSBitmapImageRep(data: png),
+                          let storedName = ClipboardImageStore.store(png) else { continue }
+                    imported = ClipboardHistoryEntry(id: record.id,
+                                                     text: "",
+                                                     copiedAt: record.updatedAt,
+                                                     pinnedAt: pinnedDate,
+                                                     kind: .image,
+                                                     imageFile: storedName,
+                                                     imageHash: record.contentHash,
+                                                     imageWidth: rep.pixelsWide,
+                                                     imageHeight: rep.pixelsHigh)
+                default:
+                    imported = nil
+                }
+                if let imported {
+                    if imported.isPinned {
+                        entries.insert(imported, at: 0)
+                    } else {
+                        entries.insert(imported, at: firstRecentIndex)
+                    }
+                    didChange = true
+                }
+            }
+        }
+        if didChange {
+            normalizeEntryOrder()
+            trimToLimit()
+            save()
+        }
     }
 
     private func normalizeEntryOrder() {

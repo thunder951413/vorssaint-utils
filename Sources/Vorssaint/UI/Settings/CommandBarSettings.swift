@@ -9,7 +9,7 @@ struct CommandBarSettings: View {
     @ObservedObject private var service = CommandBarService.shared
     @ObservedObject private var secureInput = SecureInputMonitor.shared
     @AppStorage(DefaultsKey.commandBarShortcutEnabled) private var shortcutEnabled = false
-    @AppStorage(DefaultsKey.commandBarCompactMode) private var compactMode = false
+    @AppStorage(DefaultsKey.commandBarCompactMode) private var compactMode = true
     @AppStorage(DefaultsKey.commandBarEmojiSkinTone) private var emojiSkinTone = ""
     @AppStorage(DefaultsKey.commandBarASCIILayoutEnabled) private var asciiLayoutEnabled = false
     @AppStorage(DefaultsKey.commandBarDisabledSources) private var disabledSources = ""
@@ -20,6 +20,12 @@ struct CommandBarSettings: View {
     @AppStorage(DefaultsKey.commandBarRowShortcuts) private var rowShortcutsRaw = ""
     @AppStorage(DefaultsKey.commandBarFileScopes) private var fileScopesRaw = ""
     @AppStorage(DefaultsKey.commandBarFileIgnores) private var fileIgnoresRaw = ""
+    @AppStorage(DefaultsKey.commandBarDictionaryEnabled) private var dictionaryEnabled = true
+    @AppStorage(DefaultsKey.commandBarDictionaryAutoEnabled) private var dictionaryAutoEnabled = false
+    @AppStorage(DefaultsKey.commandBarSpellEnabled) private var spellEnabled = true
+    @AppStorage(DefaultsKey.commandBarDirectoryNavEnabled) private var directoryNavEnabled = true
+    @AppStorage(DefaultsKey.commandBarPinyinFilesEnabled) private var pinyinFilesEnabled = true
+    @AppStorage(DefaultsKey.commandBarLargeTypeEnabled) private var largeTypeEnabled = true
     @State private var editing: CommandBarLink?
     @State private var ignoreDraft = ""
     @State private var showsFileOptions = false
@@ -35,7 +41,7 @@ struct CommandBarSettings: View {
     /// The examples do double duty: they say what the bar can do, which no
     /// list of toggles ever manages to.
     private var examples: [String] {
-        ["100 km to mi", "2+2*3", "brightness 40", "fire", "battery"].filter {
+        ["100 km to mi", "define serendipity", "~/Downloads/", "spell accomodate", "battery"].filter {
             $0 != "battery" || PowerSampler.hasInternalBattery
         }
     }
@@ -152,6 +158,35 @@ struct CommandBarSettings: View {
                 Text(text.sourcesTitle)
             } footer: {
                 Text(text.sourcesCaption)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Toggle(isOn: $dictionaryEnabled) {
+                    Label(YToolsStrings.dictionaryToggle, systemImage: "character.book.closed")
+                }
+                if dictionaryEnabled {
+                    Toggle(YToolsStrings.dictionaryAutoToggle, isOn: $dictionaryAutoEnabled)
+                        .padding(.leading, 22)
+                        .font(.caption)
+                }
+                Toggle(isOn: $spellEnabled) {
+                    Label(YToolsStrings.spellToggle, systemImage: "textformat.abc.dottedunderline")
+                }
+                Toggle(isOn: $directoryNavEnabled) {
+                    Label(YToolsStrings.directoryNavToggle, systemImage: "folder.badge.gearshape")
+                }
+                Toggle(isOn: $pinyinFilesEnabled) {
+                    Label(YToolsStrings.pinyinFilesToggle, systemImage: "character.textbox")
+                }
+                Toggle(isOn: $largeTypeEnabled) {
+                    Label(YToolsStrings.largeTypeToggle, systemImage: "textformat.size.larger")
+                }
+            } header: {
+                Text(YToolsStrings.extensionsSectionTitle)
+            } footer: {
+                Text(YToolsStrings.extensionsSectionFooter)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

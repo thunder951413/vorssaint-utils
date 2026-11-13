@@ -138,6 +138,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         // One binding per feature: only available features are touched, so a
         // feature switched off in the hub never even instantiates here.
         FeatureRuntime.shared.syncAtLaunch()
+        TrackpadGestureService.shared.syncWithPreferences()
         if AppFeature.monitorPower.isAvailable, PowerSampler.hasInternalBattery {
             MaxCapacityProbe.shared.refreshIfStale()
         }
@@ -158,6 +159,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
                     .textSnippets, .brightness, .radialMenu, .mouseButtonShortcuts,
                     .mouseClickDebounce, .superKey, .quitWindowProtection, .mixer, .notch,
                 ])
+                TrackpadGestureService.shared.syncWithPreferences()
             }
             .store(in: &cancellables)
 
@@ -270,6 +272,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         AppSwitcher.shared.suspend()
         MouseButtonShortcutService.shared.suspend()
         MiddleClickService.shared.suspend()
+        TrackpadGestureService.shared.suspend()
         ScrollInverter.shared.suspend()
         SmoothScrollService.shared.suspend()
         if AppFeature.mouseAcceleration.isAvailable
