@@ -509,9 +509,11 @@ enum DefaultsKey {
     static let clipboardCloudSyncEnabled = "clipboardCloudSyncEnabled"
     static let clipboardCloudSyncFolder = "clipboardCloudSyncFolder"
     static let clipboardCloudSyncPropagateDeletes = "clipboardCloudSyncPropagateDeletes"
-    // mac_gesture Trackpad Multi-Touch Gestures & Chord Key Remaps
+    // mac_gesture Trackpad Multi-Touch Gestures & Chord Key Remaps (Schema v2 Automation)
     static let trackpadGesturesEnabled = "trackpadGesturesEnabled"
     static let trackpadChordRemapEnabled = "trackpadChordRemapEnabled"
+    static let trackpadAutomationConfigJSON = "trackpadAutomationConfigJSON"
+    static let trackpadAutomationConfigMigrated = "trackpadAutomationConfigMigrated"
     static let trackpadGestureRulesJSON = "trackpadGestureRulesJSON"
     static let trackpadChordRulesJSON = "trackpadChordRulesJSON"
     static let trackpadGestureDebounceMs = "trackpadGestureDebounceMs"
@@ -1459,6 +1461,8 @@ enum Defaults {
         DefaultsKey.clipboardCloudSyncPropagateDeletes: true,
         DefaultsKey.trackpadGesturesEnabled: false,
         DefaultsKey.trackpadChordRemapEnabled: false,
+        DefaultsKey.trackpadAutomationConfigJSON: "",
+        DefaultsKey.trackpadAutomationConfigMigrated: false,
         DefaultsKey.trackpadGestureRulesJSON: "",
         DefaultsKey.trackpadChordRulesJSON: "",
         DefaultsKey.trackpadGestureDebounceMs: 150,

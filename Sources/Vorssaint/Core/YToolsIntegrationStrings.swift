@@ -51,11 +51,11 @@ enum YToolsStrings {
     static let folderBrowserSubtitle = "Folder Browser · Return or Tab to open"
 
     // MARK: - Trackpad Multi-Touch Gestures & Chord Key Remaps (mac_gesture)
-    static let gestureCardTitle = "Trackpad Multi-Touch Gestures & Key Remaps"
-    static let gestureEnableTitle = "Multi-finger swipe & pinch gestures"
-    static let gestureEnableCaption = "Maps 2, 3, or 4-finger trackpad swipes, pinches, and spreads to custom keyboard shortcuts via shared MultitouchSupport."
-    static let chordRemapEnableTitle = "Global chord key remaps"
-    static let chordRemapEnableCaption = "Intercepts key chords (such as Cmd+H/J/K/L → Arrow keys) without leaking held modifier keys into the frontmost app."
+    static let gestureCardTitle = "Trackpad Multi-Touch Gestures & Keyboard Automation"
+    static let gestureEnableTitle = "Multi-finger swipe & pinch gestures (2–5 fingers)"
+    static let gestureEnableCaption = "Maps 2–5 finger swipes and 4–5 finger pinches/spreads to shortcuts, URLs, apps, or scripts with palm & misfire rejection."
+    static let chordRemapEnableTitle = "Global keyboard hotkeys & clean chord remaps"
+    static let chordRemapEnableCaption = "Intercepts key chords (keyDown/keyUp, repeat, per-app scope) and runs multi-step actions without modifier leak."
     static let gestureImportLegacyButton = "Import ~/.gesture/config.json"
     static let gestureResetPresetsButton = "Reset Presets"
     static let gestureAddRuleButton = "Add Gesture"

@@ -123,6 +123,8 @@ enum SettingsBackupSupport {
         DefaultsKey.unifiedScreenCaptureShortcutMigrated,
         DefaultsKey.restoredScreenCaptureShortcutsMigrated,
         DefaultsKey.orphanedCaptureShortcutMigrated,
+        DefaultsKey.trackpadGestureLegacyImported,
+        DefaultsKey.trackpadAutomationConfigMigrated,
         DefaultsKey.settingsWindowWidth,
         DefaultsKey.settingsWindowHeight,
         // The last magnifier level is session history; its remembered/default
