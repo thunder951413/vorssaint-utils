@@ -542,7 +542,7 @@ struct MouseSettings: View {
                             }
                             .frame(width: 80)
                             .onChange(of: rule.minDistance) { _, _ in trackpadGestures.saveRules() }
-                            Text(String(format: "%.2f", rule.minDistance))
+                            Text(String(format: "%.2f", locale: Locale(identifier: l10n.language.rawValue), rule.minDistance))
                                 .font(.caption2.monospacedDigit())
                                 .foregroundStyle(.secondary)
                                 .frame(width: 30, alignment: .trailing)
@@ -588,7 +588,7 @@ struct MouseSettings: View {
                             .labelsHidden()
                             .onChange(of: trackpadGestureDebounceMs) { _, _ in trackpadGestures.syncWithPreferences() }
 
-                        Text(String(format: "Down bias: %.2f", trackpadGestureDownBiasRatio))
+                        Text(String(format: "Down bias: %.2f", locale: Locale(identifier: l10n.language.rawValue), trackpadGestureDownBiasRatio))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Slider(value: $trackpadGestureDownBiasRatio, in: 0.15...0.75, step: 0.05)

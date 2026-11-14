@@ -11,8 +11,8 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to release, e.g. v3.4.0-beta.2.2"
-        required: true
+        description: "Optional tag on main to release (leave blank to release HEAD of main using Info.plist version)"
+        required: false
 
 permissions: {}
 
@@ -28,24 +28,42 @@ jobs:
     timeout-minutes: 40
     permissions:
       contents: write
-    env:
-      TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          ref: ${{ inputs.tag != '' && format('refs/tags/{0}', inputs.tag) || (startsWith(github.ref, 'refs/tags/') && github.ref || 'refs/heads/main') }}
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Check tag matches app version
+      - name: Verify release is on main & matches app version
+        id: meta
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
         run: |
           set -euo pipefail
-          VERSION="${TAG#v}"
+          COMMIT="$(git rev-parse HEAD)"
+          STATUS="$(gh api "repos/${GITHUB_REPOSITORY}/compare/main...${COMMIT}" --jq .status)"
+          if [[ "$STATUS" != "identical" && "$STATUS" != "behind" ]]; then
+            echo "Release commit ${COMMIT:0:8} is not on the main branch (status: $STATUS)" >&2
+            exit 1
+          fi
           APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' Resources/Info.plist)"
+          if [[ -n "$INPUT_TAG" ]]; then
+            TAG="$INPUT_TAG"
+          elif [[ "$REF_TYPE" == "tag" ]]; then
+            TAG="$REF_NAME"
+          else
+            TAG="v${APP_VERSION}"
+          fi
+          VERSION="${TAG#v}"
           if [[ "$APP_VERSION" != "$VERSION" ]]; then
             echo "Tag $TAG does not match app version $APP_VERSION" >&2
             exit 1
           fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Unit tests
         run: ./build.sh --test
@@ -89,9 +107,15 @@ jobs:
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
         run: |
           set -euo pipefail
-          ARGS=("$TAG" dist/*.dmg --verify-tag --title "$TAG" --generate-notes)
+          ARGS=("$TAG" dist/*.dmg --title "$TAG" --generate-notes)
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
+            ARGS+=(--verify-tag)
+          else
+            ARGS+=(--target "$(git rev-parse HEAD)")
+          fi
           if [[ "$TAG" =~ -(beta|rc|alpha) ]]; then
             ARGS+=(--prerelease)
           else
