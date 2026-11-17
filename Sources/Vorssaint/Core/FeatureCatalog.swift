@@ -14,7 +14,7 @@ import Foundation
 /// keys are never touched.
 enum AppFeature: String, CaseIterable {
     // Windows and Dock
-    case switcher, dockPreview, dockClick, windowMaximizer, windowLayout, autoQuit
+    case switcher, dockPreview, dockClick, windowMaximizer, windowLayout, autoQuit, appHotkeys
     // Mouse and keyboard
     case scrollInverter, scrollHorizontal, focusFollowsMouse, smoothScroll, mouseAcceleration, mouseNavigation, mouseButtonShortcuts, middleClick,
          mouseClickDebounce, keyboardDebounce, textSnippets, superKey, quitWindowProtection
@@ -98,7 +98,7 @@ extension AppFeature {
 
     var group: FeatureGroup {
         switch self {
-        case .switcher, .dockPreview, .dockClick, .windowMaximizer, .windowLayout, .autoQuit:
+        case .switcher, .dockPreview, .dockClick, .windowMaximizer, .windowLayout, .autoQuit, .appHotkeys:
             return .windowsDock
         case .scrollInverter, .scrollHorizontal, .focusFollowsMouse, .smoothScroll, .mouseAcceleration, .mouseNavigation, .mouseButtonShortcuts, .middleClick,
              .keyboardDebounce, .textSnippets, .superKey, .quitWindowProtection, .mouseClickDebounce:
@@ -131,6 +131,7 @@ extension AppFeature {
         case .windowMaximizer: return "arrow.up.left.and.arrow.down.right"
         case .windowLayout: return "rectangle.3.group"
         case .autoQuit: return "xmark.rectangle"
+        case .appHotkeys: return "command.square"
         case .scrollInverter: return "arrow.up.arrow.down"
         case .scrollHorizontal: return "arrow.triangle.swap"
         case .focusFollowsMouse: return "cursorarrow.and.square.on.square.dashed"
@@ -228,6 +229,7 @@ extension AppFeature {
                                  DefaultsKey.dockClickCycleWindows]
         case .windowMaximizer: return [DefaultsKey.windowMaximizeEnabled]
         case .autoQuit: return [DefaultsKey.autoQuitEnabled]
+        case .appHotkeys: return [DefaultsKey.appHotkeysEnabled]
         case .scrollInverter: return [DefaultsKey.scrollInverterEnabled,
                                       DefaultsKey.scrollInverterHorizontalEnabled]
         case .scrollHorizontal: return [DefaultsKey.scrollHorizontalEnabled]
@@ -299,7 +301,7 @@ extension AppFeature {
         case .scrollInverter, .scrollHorizontal, .focusFollowsMouse, .smoothScroll, .mouseNavigation, .mouseButtonShortcuts, .middleClick,
              .keyboardDebounce, .textSnippets, .superKey, .mouseClickDebounce,
              .dockClick, .windowMaximizer, .windowLayout,
-             .autoQuit, .quitWindowProtection, .cleaningMode, .pastePlain, .radialMenu,
+             .autoQuit, .appHotkeys, .quitWindowProtection, .cleaningMode, .pastePlain, .radialMenu,
              // The bar reads other apps' menus and windows and types at the
              // caret, all of it through Accessibility.
              .commandBar:
@@ -340,7 +342,7 @@ extension AppFeature {
     /// is actually used.
     var onboardingPermissions: [AppPermission] {
         switch self {
-        case .keepAwake, .brightness, .radialMenu, .quickToggles, .cleaner,
+        case .keepAwake, .brightness, .radialMenu, .appHotkeys, .quickToggles, .cleaner,
              .uninstaller, .homebrew, .appUpdates, .mixer, .cameraPreview,
              .micMute:
             return []
@@ -408,6 +410,11 @@ extension AppFeature {
                     RadialMenuSupport.decode(dataFor(DefaultsKey.radialMenuItems)))
                     || RadialMenuMouseTrigger.sanitized(
                         stringFor(DefaultsKey.radialMenuMouseButton)) != .off
+            case (.appHotkeys, .accessibility):
+                return AppHotkeysSupport.needsAccessibility(
+                    enabled: boolFor(DefaultsKey.appHotkeysEnabled),
+                    frontmostBehaviorRaw: stringFor(DefaultsKey.appHotkeysFrontmostBehavior),
+                    entriesData: dataFor(DefaultsKey.appHotkeysEntries))
             case (.keepAwake, .accessibility):
                 return boolFor(DefaultsKey.keepAwakeMouseJiggleEnabled)
             case (.mixer, .accessibility):

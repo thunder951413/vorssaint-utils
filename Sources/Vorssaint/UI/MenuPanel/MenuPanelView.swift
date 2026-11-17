@@ -1080,7 +1080,7 @@ struct UtilitiesSection: View {
 }
 
 private enum ControlPanelItem: String, PanelOrderItem, Identifiable {
-    case mouseScroll, focusFollowsMouse, mouseAcceleration, mouseNavigation, switcher, cutPaste, autoQuit, shelf, windowMaximize, dockPreview, keyDebounce,
+    case mouseScroll, focusFollowsMouse, mouseAcceleration, mouseNavigation, switcher, cutPaste, autoQuit, appHotkeys, shelf, windowMaximize, dockPreview, keyDebounce,
          dockClick, dockClickHide, dockClickCycle, middleClick, textSnippets, radialMenu, mouseButtonShortcuts, superKey,
          mouseClickDebounce, notch
 
@@ -1097,6 +1097,7 @@ private enum ControlPanelItem: String, PanelOrderItem, Identifiable {
         case .switcher: return .switcher
         case .cutPaste: return .finderCutPaste
         case .autoQuit: return .autoQuit
+        case .appHotkeys: return .appHotkeys
         case .shelf: return .shelf
         case .windowMaximize: return .windowMaximizer
         case .dockPreview: return .dockPreview
@@ -1122,7 +1123,7 @@ private enum ControlCategory: String, CaseIterable, Identifiable {
 
     static func category(for item: ControlPanelItem) -> ControlCategory {
         switch item {
-        case .switcher, .dockPreview, .dockClick, .dockClickHide, .dockClickCycle, .windowMaximize, .autoQuit, .notch:
+        case .switcher, .dockPreview, .dockClick, .dockClickHide, .dockClickCycle, .windowMaximize, .autoQuit, .appHotkeys, .notch:
             return .windows
         case .mouseScroll, .focusFollowsMouse, .mouseAcceleration, .mouseNavigation, .mouseButtonShortcuts, .middleClick, .keyDebounce,
              .textSnippets, .radialMenu, .superKey, .mouseClickDebounce:
@@ -1169,6 +1170,8 @@ struct QuickControlsSection: View {
     @AppStorage(DefaultsKey.notchEnabled) private var notchEnabled = false
     @AppStorage(DefaultsKey.panelControlNotch) private var showNotch = true
     @AppStorage(DefaultsKey.radialMenuEnabled) private var radialMenuEnabled = false
+    @AppStorage(DefaultsKey.appHotkeysEnabled) private var appHotkeysEnabled = true
+    @AppStorage(DefaultsKey.panelControlAppHotkeys) private var showAppHotkeys = true
     @AppStorage(DefaultsKey.mouseButtonShortcutsEnabled) private var mouseButtonShortcutsEnabled = false
     @AppStorage(DefaultsKey.mouseSpacesGestureEnabled) private var spacesEnabled = false
     @AppStorage(DefaultsKey.superKeyEnabled) private var superKeyEnabled = false
@@ -1304,6 +1307,7 @@ struct QuickControlsSection: View {
         case .switcher: return switcherEnabled
         case .cutPaste: return cutPasteEnabled
         case .autoQuit: return autoQuitEnabled
+        case .appHotkeys: return appHotkeysEnabled
         case .shelf: return shelfEnabled
         case .windowMaximize: return windowMaximizeEnabled
         case .dockPreview: return dockPreviewEnabled
@@ -1383,6 +1387,7 @@ struct QuickControlsSection: View {
         case .keyDebounce: return showKeyDebounce
         case .cutPaste: return showCutPaste
         case .autoQuit: return showAutoQuit
+        case .appHotkeys: return showAppHotkeys
         case .shelf: return showShelf
         case .windowMaximize: return showWindowMaximize
         case .dockPreview: return showDockPreview
@@ -1711,6 +1716,38 @@ struct QuickControlsSection: View {
                         requestAccessibilityIfNeeded(enabled)
                     }
                 }
+        case .appHotkeys:
+            let hotkeyStrings = FeatureStrings.appHotkeys(l10n.language)
+            let needsAccessibility = AppHotkeysSupport.needsAccessibility(
+                enabled: appHotkeysEnabled,
+                frontmostBehaviorRaw: UserDefaults.standard.string(forKey: DefaultsKey.appHotkeysFrontmostBehavior),
+                entriesData: UserDefaults.standard.data(forKey: DefaultsKey.appHotkeysEntries))
+            PanelToggleRow(title: hotkeyStrings.title,
+                           caption: appHotkeysEnabled && needsAccessibility && !permissions.accessibility
+                               ? missingPermission(l10n.s.permissionAccessibility)
+                               : hotkeyStrings.panelCaption,
+                           systemImage: AppFeature.appHotkeys.symbolName,
+                           isOn: $appHotkeysEnabled,
+                           isEditing: editing,
+                           showsDragHandle: true,
+                           visibility: $showAppHotkeys,
+                           needsAttention: appHotkeysEnabled && needsAccessibility
+                               && !permissions.accessibility,
+                           permissionButtonTitle: l10n.s.permissionRequest,
+                           permissionAction: needsAccessibility
+                               ? accessibilityPermissionAction(appHotkeysEnabled)
+                               : nil,
+                           accessoryTitle: appHotkeysEnabled ? hotkeyStrings.manageButton : nil,
+                           accessoryAction: {
+                               SettingsRouter.shared.page = .appHotkeys
+                               appDelegate()?.openSettingsWindow()
+                           })
+                .onChange(of: appHotkeysEnabled) { _, enabled in
+                    AppHotkeysService.shared.syncWithPreferences()
+                    if needsAccessibility {
+                        requestAccessibilityIfNeeded(enabled)
+                    }
+                }
         case .mouseButtonShortcuts:
             let buttonStrings = FeatureStrings.mouseButtons(l10n.language)
             // Either switch drives the same tap and needs the same grant
@@ -1823,6 +1860,7 @@ struct QuickControlsSection: View {
         showMiddleClick = true
         showTextSnippets = true
         showRadialMenu = true
+        showAppHotkeys = true
         showMouseButtonShortcuts = true
         showSuperKey = true
         showMouseAcceleration = true

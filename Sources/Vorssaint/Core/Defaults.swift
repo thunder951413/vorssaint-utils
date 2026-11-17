@@ -787,6 +787,12 @@ enum DefaultsKey {
     static let radialMenuItems = "radialMenuItems"        // Data: [RadialMenuItem] JSON
     static let radialMenuProfiles = "radialMenuProfiles"  // Data: [RadialMenuProfile] JSON
 
+    // App Hotkeys: dedicated global shortcuts to summon favorite apps.
+    static let appHotkeysEnabled = "appHotkeysEnabled"
+    static let appHotkeysFrontmostBehavior = "appHotkeysFrontmostBehavior"
+    static let appHotkeysEntries = "appHotkeysEntries"    // Data: [AppHotkeyEntry] JSON
+    static let panelControlAppHotkeys = "panelControlAppHotkeys"
+
     // Dev-build only: force the "update available" UI for local testing.
     static let simulateUpdate = "simulateUpdate"
     static let simulateBetaUI = "simulateBetaUI"
@@ -1244,6 +1250,9 @@ enum Defaults {
         DefaultsKey.radialMenuAtPointer: true,
         DefaultsKey.radialMenuMouseButton: RadialMenuMouseTrigger.off.rawValue,
         DefaultsKey.radialMenuActivationMode: RadialMenuActivationMode.pressOrHold.rawValue,
+        DefaultsKey.appHotkeysEnabled: true,
+        DefaultsKey.appHotkeysFrontmostBehavior: AppHotkeyFrontmostBehavior.defaultBehavior.rawValue,
+        DefaultsKey.panelControlAppHotkeys: true,
         DefaultsKey.windowMaximizeEnabled: false,
         DefaultsKey.keyboardDebounceEnabled: false,
         DefaultsKey.keyboardDebounceWindowMs: defaultKeyboardDebounceWindowMs,

@@ -610,6 +610,9 @@ final class CommandBarService: ObservableObject {
            let title = WindowLayoutService.shared.shortcutConflictTitle(shortcut) {
             return String(format: strings.shortcutConflictFormat, title)
         }
+        if let title = AppHotkeysService.shared.shortcutConflictTitle(shortcut) {
+            return String(format: strings.shortcutConflictFormat, title)
+        }
         return nil
     }
 

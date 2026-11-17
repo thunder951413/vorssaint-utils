@@ -112,6 +112,7 @@ enum SelfUninstall {
         ScreenTextService.shared.suspend()
         CameraPreviewService.shared.suspend()
         RadialMenuService.shared.suspend()
+        AppHotkeysService.shared.suspend()
         ScratchpadService.shared.suspend()
         CommandBarService.shared.suspend()
         PreciseVolumeRollerService.shared.suspend()

@@ -57,6 +57,29 @@ struct ShortcutsSettings: View {
                 }
             }
 
+            if AppFeature.appHotkeys.isAvailable {
+                let appHotkeysText = FeatureStrings.appHotkeys(l10n.language)
+                Section {
+                    Button {
+                        SettingsRouter.shared.page = .appHotkeys
+                    } label: {
+                        HStack {
+                            Label(appHotkeysText.title, systemImage: AppFeature.appHotkeys.symbolName)
+                            Spacer()
+                            let activeCount = AppHotkeysService.shared.activeShortcutCount
+                            if activeCount > 0 {
+                                Text(String(format: appHotkeysText.activeCountFormat, activeCount))
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    Text(appHotkeysText.hubDescription)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             if AppFeature.commandBar.isAvailable {
                 Section {
                     Button {
@@ -207,8 +230,11 @@ struct ShortcutsSettings: View {
             superKeyModifiers: superKey.modifiers,
             includeInactiveConflicts: true,
             additionalConflict: { shortcut in
-                guard AppFeature.windowLayout.isAvailable else { return nil }
-                return WindowLayoutService.shared.shortcutConflictTitle(shortcut, excluding: nil)
+                if AppFeature.windowLayout.isAvailable,
+                   let conflict = WindowLayoutService.shared.shortcutConflictTitle(shortcut, excluding: nil) {
+                    return conflict
+                }
+                return AppHotkeysService.shared.shortcutConflictTitle(shortcut, includeInactive: true)
             },
             onChange: {
                 FeatureRuntime.shared.sync(role.availabilityFeatures)

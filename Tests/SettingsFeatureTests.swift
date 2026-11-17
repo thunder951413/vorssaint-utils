@@ -146,6 +146,11 @@ enum SettingsFeatureTests {
                 && backupKeys.contains(DefaultsKey.radialMenuItems)
                 && backupKeys.contains(DefaultsKey.panelControlRadialMenu),
                "the radial menu wheel and choices travel with the settings backup")
+        suite.expect(backupKeys.contains(DefaultsKey.appHotkeysEnabled)
+                && backupKeys.contains(DefaultsKey.appHotkeysFrontmostBehavior)
+                && backupKeys.contains(DefaultsKey.appHotkeysEntries)
+                && backupKeys.contains(DefaultsKey.panelControlAppHotkeys),
+               "app hotkeys bindings and preferences travel with the settings backup")
         suite.expect(backupKeys.contains(DefaultsKey.mouseButtonShortcutsEnabled)
                 && backupKeys.contains(DefaultsKey.mouseButtonShortcuts)
                 && backupKeys.contains(DefaultsKey.panelControlMouseButtonShortcuts),

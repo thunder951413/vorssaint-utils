@@ -325,6 +325,8 @@ if (( TEST )); then
         Sources/Vorssaint/Core/CommandBarStrings.swift
         Sources/Vorssaint/Core/FeedbackStrings.swift
         Sources/Vorssaint/Core/RadialMenuStrings.swift
+        Sources/Vorssaint/Core/AppHotkeysStrings.swift
+        Sources/Vorssaint/Services/AppHotkeys/AppHotkeysSupport.swift
         Sources/Vorssaint/Core/MenuBarAppearanceStrings.swift
         Sources/Vorssaint/Core/AppAppearance.swift
         Sources/Vorssaint/Core/AppearanceStrings.swift

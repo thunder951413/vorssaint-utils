@@ -47,6 +47,7 @@ struct MetricsTests {
             ("features", { FeatureCatalogTests.run(suite) }),
             ("utilities", {
                 UtilitiesFeatureTests.run(suite)
+                AppHotkeysFeatureTests.run(suite)
                 FanControlLifecycleTests.run(suite)
                 FinderPasteboardLifecycleTests.run(suite)
             }),
