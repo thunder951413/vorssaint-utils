@@ -379,5 +379,15 @@ enum TrackpadGestureTests {
             isKeyDown: false, keyCode: 38, flags: [], isRepeat: false,
             sourcePID: 100, shouldHandle: true, frontmostBundleID: nil
         ) == .consume(triggered: keyUpRule), "keyUp rule triggers cleanly even after modifier was released first")
+
+        // YTools + gesture localization coverage across all 13 app languages
+        for language in AppLanguage.allCases {
+            LocalizationTests.check(
+                YToolsIntegrationStrings.localized(language),
+                against: YToolsIntegrationStrings.enUS,
+                name: "ytools/\(language.rawValue)",
+                suite: suite
+            )
+        }
     }
 }

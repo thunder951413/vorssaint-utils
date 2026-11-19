@@ -53,13 +53,11 @@ struct TrackpadGestureSettingsSection: View {
     }
 
     var body: some View {
-        SettingsCard(title: isChinese ? "触控板多指手势与键盘自动化 (Gesture)" : YToolsStrings.gestureCardTitle) {
+        SettingsCard(title: YToolsStrings.gestureCardTitle) {
             SettingsRow(
                 symbol: "hand.draw",
-                title: isChinese ? "触控板多指滑动 / 捏合手势" : YToolsStrings.gestureEnableTitle,
-                caption: isChinese
-                    ? "支持 2–5 指滑动与 4–5 指捏合/张开，内置相对面积掌缘过滤、孤立掌根过滤、多指共同移动校验与公开事件兼容降级。"
-                    : YToolsStrings.gestureEnableCaption
+                title: YToolsStrings.gestureEnableTitle,
+                caption: YToolsStrings.gestureEnableCaption
             ) {
                 HStack(spacing: 8) {
                     if trackpadGesturesEnabled && service.trackpadBackendState.isRunning {
@@ -76,10 +74,8 @@ struct TrackpadGestureSettingsSection: View {
 
             SettingsRow(
                 symbol: "keyboard",
-                title: isChinese ? "全局键盘热键与无泄漏重映射" : YToolsStrings.chordRemapEnableTitle,
-                caption: isChinese
-                    ? "支持按下/松开时机、长按连发、按 App 限定范围及多动作序列（快捷键、网址、应用、Shell、AppleScript、等待）。"
-                    : YToolsStrings.chordRemapEnableCaption
+                title: YToolsStrings.chordRemapEnableTitle,
+                caption: YToolsStrings.chordRemapEnableCaption
             ) {
                 HStack(spacing: 8) {
                     if trackpadChordRemapEnabled && service.isChordRunning {
@@ -515,7 +511,7 @@ struct TrackpadGestureSettingsSection: View {
             )
 
             HStack(spacing: 8) {
-                Button(isChinese ? "导入 ~/.gesture/config.json" : YToolsStrings.gestureImportLegacyButton) {
+                Button(YToolsStrings.gestureImportLegacyButton) {
                     if service.importLegacyConfigFromHome() {
                         syncFeedback = isChinese ? "已导入 ~/.gesture/config.json" : "Imported ~/.gesture/config.json"
                     } else {
@@ -537,7 +533,7 @@ struct TrackpadGestureSettingsSection: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
 
-                Button(isChinese ? "恢复默认规则" : YToolsStrings.gestureResetPresetsButton) {
+                Button(YToolsStrings.gestureResetPresetsButton) {
                     service.resetToPresets()
                     syncFeedback = isChinese ? "已恢复默认规则预设" : "Presets restored"
                 }
