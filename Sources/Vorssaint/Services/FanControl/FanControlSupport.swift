@@ -234,25 +234,40 @@ enum FanControlPolicy {
     /// spin up and down (or replay the stopped-fan start) every few seconds.
     /// It only ever delays handing back, never raising the fans.
     static let minimumCurveHoldDuration: TimeInterval = 30
-    /// Manual mode switches the firmware's own controller off, so while a curve
-    /// runs nobody knows what the system would ask for now. A check hands the
-    /// fans back, takes them again as soon as the firmware writes its own
-    /// target, and keeps control only if the curve still wants clearly more.
-    /// Checks run when the sensor has warmed since the last one (the usual
-    /// reason the system would want more), plus a slow backstop for heat the
-    /// curve's sensor does not see.
-    static let systemCheckTemperatureRise = 2.0
-    static let systemCheckBackstopInterval: TimeInterval = 180
-    static let systemCheckMinimumSpacing: TimeInterval = 20
-    /// The firmware's target is polled this often during a check, and the fans
-    /// are taken back the moment it changes, so inertia hides the handover.
-    static let systemCheckPollInterval: TimeInterval = 0.2
-    /// No change by then means the firmware wants what the fans already run.
-    static let systemCheckResponseTimeout: TimeInterval = 3
     /// Consecutive app-side polls that must agree before a takeover is sent.
     static let takeoverConfirmationSamples = 2
     /// Delay before an automatic takeover is retried after the helper refused it.
     static let takeoverRetryBackoff: TimeInterval = 30
+    /// Pause after a clean handback so macOS's controller settles its own target
+    /// before automatic re-takeover evaluates against it again.
+    static let handbackCooldown: TimeInterval = 15
+    /// Asymmetric temperature smoothing (1 s ticks): responsive on warming so
+    /// sustained loads cool promptly, gentler on cooling so brief lulls and
+    /// sensor jitter do not make the fans audibly hunt up and down.
+    static let temperatureSmoothingUp = 0.25
+    static let temperatureSmoothingDown = 0.12
+    /// Consecutive ticks at raw emergency heat that bypass smoothing lag.
+    static let emergencyConfirmationTicks = 2
+    /// Slew/dwell tuning for automatic level updates: ramp up smoothly every
+    /// second, and wait for sustained lower demand before gliding down 5% at a
+    /// time.
+    static let stepUpInterval: TimeInterval = 1
+    static let stepDownDwellDuration: TimeInterval = 5
+    static let fastRampGap = 20
+    /// Multi-sensor protective floor enforced while manual/curve mode owns the
+    /// fans. Replaces periodic firmware handovers (which audibly spun fans down
+    /// and up) by continuously watching all chip, GPU, battery and OS thermal
+    /// pressure signals without touching fan mode.
+    static let safetyHotDieStart = 78.0
+    static let safetyHotDieFull = 95.0
+    static let safetyAverageDieStart = 72.0
+    static let safetyAverageDieFull = 88.0
+    static let safetyGPUStart = 72.0
+    static let safetyGPUFull = 88.0
+    static let safetyBatteryStart = 39.0
+    static let safetyBatteryFull = 46.0
+    static let safetyFairThermalFloor = 50
+    static let safetyEmergencyTemperature = 95.0
 
     static func isAutomaticMode(_ mode: UInt8) -> Bool {
         mode == 0 || mode == 3
@@ -340,6 +355,12 @@ enum FanControlPolicy {
         return min(maximumCoolingLevel, max(minimumCoolingLevel, stepped))
     }
 
+    static func ceilingCoolingLevel(fromFraction fraction: Double) -> Int {
+        let raw = min(1, max(0, fraction)) * Double(maximumCoolingLevel)
+        let stepped = Int(ceil(raw / Double(coolingLevelStep) - 1e-9)) * coolingLevelStep
+        return min(maximumCoolingLevel, max(minimumCoolingLevel, stepped))
+    }
+
     static func validCurves(_ curves: [FanControlCurve]) -> Bool {
         guard (1...maximumCurveCount).contains(curves.count),
               Set(curves.map(\.sensor)).count == curves.count else { return false }
@@ -390,8 +411,16 @@ enum FanControlPolicy {
 
     static func shouldTakeOver(level: Int, fans: [FanControlFanReading]) -> Bool {
         guard validCoolingLevel(level), !fans.isEmpty else { return false }
-        if level >= maximumCoolingLevel { return true }
-        return fans.contains { fan in
+        if level >= maximumCoolingLevel {
+            return fans.contains { fan in
+                guard validBounds(minimum: fan.minimumRPM, maximum: fan.maximumRPM) else {
+                    return false
+                }
+                return max(fan.actualRPM, fan.targetRPM) < fan.maximumRPM - 25
+            }
+        }
+        guard level > minimumCoolingLevel else { return false }
+        return fans.allSatisfy { fan in
             guard let curveRPM = coolingTargetRPM(minimum: fan.minimumRPM,
                                                   maximum: fan.maximumRPM,
                                                   level: level) else { return false }
@@ -408,27 +437,97 @@ enum FanControlPolicy {
             && requestedLevel < floorLevel
     }
 
-    static func systemCheckDue(lastCheck: TimeInterval?, controlStarted: TimeInterval?,
-                               now: TimeInterval,
-                               referenceTemperature: Double?,
-                               temperature: Double?) -> Bool {
-        guard let reference = lastCheck ?? controlStarted else { return false }
-        let elapsed = now - reference
-        guard elapsed >= systemCheckMinimumSpacing else { return false }
-        if elapsed >= systemCheckBackstopInterval { return true }
-        guard let referenceTemperature, let temperature,
-              referenceTemperature.isFinite, temperature.isFinite else { return false }
-        return temperature - referenceTemperature >= systemCheckTemperatureRise
+    static func thermalStateBlocksTakeover(_ thermalState: ProcessInfo.ThermalState) -> Bool {
+        thermalState == .serious || thermalState == .critical
     }
 
-    /// Whether the firmware has written its own target since the handover:
-    /// any fan whose target moved away from what the curve had set.
-    static func firmwareResponded(previousTargets: [Double],
-                                  fans: [FanControlFanReading]) -> Bool {
-        guard previousTargets.count == fans.count, !fans.isEmpty else { return false }
-        return zip(fans, previousTargets).contains { fan, previous in
-            !targetRPMMatches(target: fan.targetRPM, expected: previous)
+    static func smoothedTemperature(previous: Double?, sample: Double) -> Double {
+        guard sample.isFinite else { return previous ?? sample }
+        guard let previous, previous.isFinite else { return sample }
+        let alpha = sample >= previous ? temperatureSmoothingUp : temperatureSmoothingDown
+        return previous + alpha * (sample - previous)
+    }
+
+    /// Continuous multi-sensor protective floor computed purely from read-only
+    /// sensors and macOS thermal pressure, ensuring our applied speed never
+    /// under-cools another hot die, GPU, battery or elevated thermal state.
+    static func safetyCoolingLevel(
+        temperatures: [FanControlTemperatureReading],
+        batteryTemperature: Double? = nil,
+        thermalState: ProcessInfo.ThermalState = .nominal
+    ) -> Int {
+        if thermalStateBlocksTakeover(thermalState) {
+            return maximumCoolingLevel
         }
+        var floor = thermalState == .fair ? safetyFairThermalFloor : minimumCoolingLevel
+        for reading in temperatures where validTemperature(reading.celsius) {
+            let demand: Int
+            switch reading.source {
+            case .hottestCPU, .hottestSoC, .packageCPU:
+                demand = linearSafetyLevel(reading.celsius,
+                                           start: safetyHotDieStart,
+                                           full: safetyHotDieFull)
+            case .averageCPU, .averageSoC:
+                demand = linearSafetyLevel(reading.celsius,
+                                           start: safetyAverageDieStart,
+                                           full: safetyAverageDieFull)
+            case .hottestGPU:
+                demand = linearSafetyLevel(reading.celsius,
+                                           start: safetyGPUStart,
+                                           full: safetyGPUFull)
+            }
+            floor = max(floor, demand)
+        }
+        if let batteryTemperature, validTemperature(batteryTemperature) {
+            floor = max(floor, linearSafetyLevel(batteryTemperature,
+                                                 start: safetyBatteryStart,
+                                                 full: safetyBatteryFull))
+        }
+        return floor
+    }
+
+    private static func linearSafetyLevel(_ temperature: Double,
+                                          start: Double,
+                                          full: Double) -> Int {
+        guard temperature > start, full > start else { return minimumCoolingLevel }
+        if temperature >= full { return maximumCoolingLevel }
+        return ceilingCoolingLevel(fromFraction: (temperature - start) / (full - start))
+    }
+
+    /// Smoothly advances the active cooling level toward `desired` so sensor
+    /// jitter and brief workload lulls cannot make the fans audibly hunt up
+    /// and down. Upward steps respond quickly; downward steps wait for a
+    /// sustained lower demand and glide down one step at a time.
+    static func nextCoolingLevel(
+        current: Int,
+        desired: Int,
+        now: TimeInterval,
+        lastChangeAt: TimeInterval?,
+        stepDownCandidateSince: TimeInterval?,
+        urgent: Bool = false
+    ) -> (level: Int, stepDownCandidateSince: TimeInterval?) {
+        let target = min(maximumCoolingLevel, max(minimumCoolingLevel, desired))
+        guard target != current else { return (current, nil) }
+        if target > current {
+            if urgent || target >= maximumCoolingLevel {
+                return (target, nil)
+            }
+            if let lastChangeAt, now - lastChangeAt < stepUpInterval {
+                return (current, nil)
+            }
+            let step = (target - current >= fastRampGap)
+                ? coolingLevelStep * 2
+                : coolingLevelStep
+            return (min(target, current + step), nil)
+        }
+        guard let since = stepDownCandidateSince else {
+            return (current, now)
+        }
+        guard now - since >= stepDownDwellDuration else {
+            return (current, since)
+        }
+        let next = max(target, current - coolingLevelStep)
+        return (next, next > target ? now : nil)
     }
 
     static func curveHoldElapsed(startedAt start: TimeInterval?, now: TimeInterval) -> Bool {
@@ -436,12 +535,15 @@ enum FanControlPolicy {
         return now - start >= minimumCurveHoldDuration
     }
 
+    /// Ceiling-stepped level that guarantees `coolingTargetRPM` is at least
+    /// `max(actualRPM, targetRPM)` on every fan so takeover never slows fans
+    /// below what macOS was already running.
     static func floorCoolingLevel(fans: [FanControlFanReading]) -> Int {
         let levels = fans.compactMap { fan -> Int? in
             guard validBounds(minimum: fan.minimumRPM, maximum: fan.maximumRPM) else { return nil }
             let floorRPM = min(fan.maximumRPM, max(fan.minimumRPM, max(fan.actualRPM, fan.targetRPM)))
             let fraction = (floorRPM - fan.minimumRPM) / (fan.maximumRPM - fan.minimumRPM)
-            return steppedCoolingLevel(fromFraction: fraction)
+            return ceilingCoolingLevel(fromFraction: fraction)
         }
         return levels.max() ?? minimumCoolingLevel
     }
@@ -561,7 +663,7 @@ enum FanControlPolicy {
         if heartbeatAge > heartbeatLimit { return .heartbeatLost }
         if verificationFailures >= verificationFailureLimit { return .hardwareChanged }
         if temperatureFailures >= temperatureFailureLimit { return .temperatureUnavailable }
-        if thermalState == .serious || thermalState == .critical {
+        if thermalStateBlocksTakeover(thermalState) {
             return .thermalPressure
         }
         return nil

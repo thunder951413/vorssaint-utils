@@ -540,6 +540,17 @@ enum DefaultsKey {
     static let cameraPreviewShortcut = "cameraPreviewShortcut"
     static let scratchpadShortcutEnabled = "scratchpadShortcutEnabled"
     static let scratchpadShortcut = "scratchpadShortcut"
+    static let dispatchHubShortcutEnabled = "dispatchHubShortcutEnabled"
+    static let dispatchHubShortcut = "dispatchHubShortcut"
+    static let dispatchHubFrame = "dispatchHubFrame"
+    static let dispatchHubCloseOnClickOutside = "dispatchHubCloseOnClickOutside"
+    static let dispatchHubAutoPrefill = "dispatchHubAutoPrefill"
+    static let dispatchHubShizhiEnabled = "dispatchHubShizhiEnabled"
+    static let dispatchHubShizhiURL = "dispatchHubShizhiURL"
+    static let dispatchHubTeamsEnabled = "dispatchHubTeamsEnabled"
+    static let dispatchHubTeamsURL = "dispatchHubTeamsURL"
+    static let dispatchHubTeamsMe = "dispatchHubTeamsMe"
+    static let dispatchHubShizhiItems = "dispatchHubShizhiItems"
     static let commandBarShortcutEnabled = "commandBarShortcutEnabled"
     static let commandBarShortcut = "commandBarShortcut"
     /// Compact mode: an empty field shows nothing but itself. Off by default
@@ -792,6 +803,23 @@ enum DefaultsKey {
     static let appHotkeysFrontmostBehavior = "appHotkeysFrontmostBehavior"
     static let appHotkeysEntries = "appHotkeysEntries"    // Data: [AppHotkeyEntry] JSON
     static let panelControlAppHotkeys = "panelControlAppHotkeys"
+
+    // Menu Bar Hider (macOS 27+): native visibility hiding + floating hidden bar.
+    static let menuBarHiderEnabled = "menuBarHiderEnabled"
+    static let menuBarHiderShowTriggerIcon = "menuBarHiderShowTriggerIcon"
+    static let menuBarHiderShowOnEmptyClick = "menuBarHiderShowOnEmptyClick"
+    static let menuBarHiderEnableAlwaysHidden = "menuBarHiderEnableAlwaysHidden"
+    static let menuBarHiderOptionToggleAlwaysHidden = "menuBarHiderOptionToggleAlwaysHidden"
+    static let menuBarHiderBarStyle = "menuBarHiderBarStyle"
+    static let menuBarHiderBarLocation = "menuBarHiderBarLocation"
+    static let menuBarHiderIconSize = "menuBarHiderIconSize"
+    static let menuBarHiderItemSpacing = "menuBarHiderItemSpacing"
+    static let menuBarHiderBarPadding = "menuBarHiderBarPadding"
+    static let menuBarHiderAutoRehide = "menuBarHiderAutoRehide"
+    static let menuBarHiderRehideStrategy = "menuBarHiderRehideStrategy"
+    static let menuBarHiderRehideInterval = "menuBarHiderRehideInterval"
+    static let menuBarHiderTempShowInterval = "menuBarHiderTempShowInterval"
+    static let menuBarHiderAssignments = "menuBarHiderAssignments" // [String: String]
 
     // Dev-build only: force the "update available" UI for local testing.
     static let simulateUpdate = "simulateUpdate"
@@ -1253,6 +1281,20 @@ enum Defaults {
         DefaultsKey.appHotkeysEnabled: true,
         DefaultsKey.appHotkeysFrontmostBehavior: AppHotkeyFrontmostBehavior.defaultBehavior.rawValue,
         DefaultsKey.panelControlAppHotkeys: true,
+        DefaultsKey.menuBarHiderEnabled: true,
+        DefaultsKey.menuBarHiderShowTriggerIcon: true,
+        DefaultsKey.menuBarHiderShowOnEmptyClick: true,
+        DefaultsKey.menuBarHiderEnableAlwaysHidden: false,
+        DefaultsKey.menuBarHiderOptionToggleAlwaysHidden: true,
+        DefaultsKey.menuBarHiderBarStyle: MenuBarHiderBarStyle.frosted.rawValue,
+        DefaultsKey.menuBarHiderBarLocation: MenuBarHiderBarLocation.dynamic.rawValue,
+        DefaultsKey.menuBarHiderIconSize: MenuBarHiderSupport.defaultIconSize,
+        DefaultsKey.menuBarHiderItemSpacing: MenuBarHiderSupport.defaultItemSpacing,
+        DefaultsKey.menuBarHiderBarPadding: MenuBarHiderSupport.defaultBarPadding,
+        DefaultsKey.menuBarHiderAutoRehide: true,
+        DefaultsKey.menuBarHiderRehideStrategy: MenuBarHiderRehideStrategy.smart.rawValue,
+        DefaultsKey.menuBarHiderRehideInterval: MenuBarHiderSupport.defaultRehideInterval,
+        DefaultsKey.menuBarHiderTempShowInterval: MenuBarHiderSupport.defaultTempShowInterval,
         DefaultsKey.windowMaximizeEnabled: false,
         DefaultsKey.keyboardDebounceEnabled: false,
         DefaultsKey.keyboardDebounceWindowMs: defaultKeyboardDebounceWindowMs,
@@ -1503,6 +1545,15 @@ enum Defaults {
         DefaultsKey.cameraPreviewShortcut: GlobalShortcut.cameraPreviewDefault.storageValue,
         DefaultsKey.scratchpadShortcutEnabled: false,
         DefaultsKey.scratchpadShortcut: GlobalShortcut.scratchpadDefault.storageValue,
+        DefaultsKey.dispatchHubShortcutEnabled: false,
+        DefaultsKey.dispatchHubShortcut: GlobalShortcut.dispatchHubDefault.storageValue,
+        DefaultsKey.dispatchHubCloseOnClickOutside: true,
+        DefaultsKey.dispatchHubAutoPrefill: true,
+        DefaultsKey.dispatchHubShizhiEnabled: true,
+        DefaultsKey.dispatchHubShizhiURL: "http://127.0.0.1:8767",
+        DefaultsKey.dispatchHubTeamsEnabled: false,
+        DefaultsKey.dispatchHubTeamsURL: "",
+        DefaultsKey.dispatchHubTeamsMe: "",
         DefaultsKey.commandBarShortcutEnabled: false,
         DefaultsKey.commandBarCompactMode: true,
         DefaultsKey.commandBarASCIILayoutEnabled: false,

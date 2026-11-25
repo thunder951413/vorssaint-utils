@@ -36,6 +36,7 @@ final class FanControlService: ObservableObject {
     private var probeInFlight = false
     private var takeoverConfirmations = 0
     private var takeoverRetryNotBefore: TimeInterval = 0
+    private var handbackCooldownNotBefore: TimeInterval = 0
     private var curveReapplyWorkItem: DispatchWorkItem?
     private var curveReapplyPending = false
     private static let curveReapplyDelay: TimeInterval = 0.4
@@ -86,7 +87,11 @@ final class FanControlService: ObservableObject {
     func panelDidAppear() {
         panelIsVisible = true
         startObservingSystemState()
-        refreshLocalProbe()
+        if snapshot.isCooling {
+            heartbeat()
+        } else {
+            refreshLocalProbe()
+        }
         startTimerIfNeeded()
     }
 
@@ -180,7 +185,10 @@ final class FanControlService: ObservableObject {
             return
         }
         error = nil
-        if userInitiated { takeoverRetryNotBefore = 0 }
+        if userInitiated {
+            takeoverRetryNotBefore = 0
+            handbackCooldownNotBefore = 0
+        }
         let retrySnapshot = snapshot
         let armCurve = configuration.mode == .curve
         startObservingSystemState()
@@ -507,6 +515,19 @@ final class FanControlService: ObservableObject {
             }
             self.apply(response)
             if response.succeeded, !response.snapshot.isCooling {
+                self.takeoverConfirmations = 0
+                let now = ProcessInfo.processInfo.systemUptime
+                if response.snapshot.stopReason != nil {
+                    self.takeoverRetryNotBefore = max(
+                        self.takeoverRetryNotBefore,
+                        now + FanControlPolicy.takeoverRetryBackoff
+                    )
+                } else {
+                    self.handbackCooldownNotBefore = max(
+                        self.handbackCooldownNotBefore,
+                        now + FanControlPolicy.handbackCooldown
+                    )
+                }
                 UserDefaults.standard.removeObject(forKey: DefaultsKey.fanControlRecoveryNeeded)
                 self.stopIdleWorkIfPossible()
             }
@@ -686,7 +707,9 @@ final class FanControlService: ObservableObject {
             }
         }
         if error == .alreadyControlled {
-            self.error = error
+            if !self.snapshot.isCooling {
+                self.error = error
+            }
         } else if self.error == .noFans || self.error == .unsupportedHardware {
             self.error = error
         }
@@ -779,6 +802,10 @@ final class FanControlService: ObservableObject {
     private func tryTakeOverIfNeeded() {
         guard isCurveArmed, !snapshot.isCooling, !helperUnreachable, !isSleeping,
               !isWorking, !requestInFlight else { return }
+        guard !FanControlPolicy.thermalStateBlocksTakeover(ProcessInfo.processInfo.thermalState) else {
+            takeoverConfirmations = 0
+            return
+        }
         let defaults = UserDefaults.standard
         let sensor = FanControlTemperatureSource(
             rawValue: defaults.string(forKey: DefaultsKey.fanControlSensor) ?? "")
@@ -799,8 +826,12 @@ final class FanControlService: ObservableObject {
         case .cooling(let level)
             where FanControlPolicy.shouldTakeOver(level: level, fans: snapshot.fans):
             takeoverConfirmations += 1
+            let now = ProcessInfo.processInfo.systemUptime
+            let cooledDown = level >= FanControlPolicy.maximumCoolingLevel
+                || now >= handbackCooldownNotBefore
             guard takeoverConfirmations >= FanControlPolicy.takeoverConfirmationSamples,
-                  ProcessInfo.processInfo.systemUptime >= takeoverRetryNotBefore else { return }
+                  now >= takeoverRetryNotBefore,
+                  cooledDown else { return }
             takeoverConfirmations = 0
             applyStoredCurve(userInitiated: false)
         case .cooling, .belowThreshold, .unavailable:

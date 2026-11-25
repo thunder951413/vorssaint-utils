@@ -35,6 +35,7 @@ final class FanControlHardware {
         let cpu: [SMCClient.Key]
         let gpu: [SMCClient.Key]
         let package: [SMCClient.Key]
+        let battery: [SMCClient.Key]
     }
 
     private let client: SMCClient
@@ -126,19 +127,33 @@ final class FanControlHardware {
                                                       writeSucceeded: forced) else {
                 throw FanControlHardwareError.operationFailed
             }
-            // A stopped Apple Silicon fan can reject manual mode until the
-            // automatic controller has accepted a protective maximum target.
-            // Apply the requested level only after manual mode sticks.
-            for fan in fans {
-                guard setValue(fan.maximumRPM, for: fan.target, attempts: 10) else {
-                    throw FanControlHardwareError.operationFailed
+            // Wait for thermalmonitord to yield manual mode after Ftst=1
+            // without blasting maximum RPM first.
+            var manualStuck = forceTest != nil
+            if manualStuck {
+                let quietDeadline = ProcessInfo.processInfo.systemUptime + 5
+                for fan in fans {
+                    if !setMode(1, for: fan, untilUptime: quietDeadline) {
+                        manualStuck = false
+                        break
+                    }
                 }
             }
-            Thread.sleep(forTimeInterval: 3)
-            for fan in fans {
-                let deadline = ProcessInfo.processInfo.systemUptime + 10
-                guard setMode(1, for: fan, untilUptime: deadline) else {
-                    throw FanControlHardwareError.operationFailed
+            // Fallback for stopped Apple Silicon fans that reject manual mode
+            // until the controller sees a wake target. Poll immediately for
+            // mode 1 instead of blindly holding maximum RPM for seconds, so the
+            // requested level is applied the moment manual mode sticks.
+            if !manualStuck {
+                for fan in fans {
+                    guard setValue(fan.maximumRPM, for: fan.target, attempts: 10) else {
+                        throw FanControlHardwareError.operationFailed
+                    }
+                }
+                let wakeDeadline = ProcessInfo.processInfo.systemUptime + 10
+                for fan in fans {
+                    guard setMode(1, for: fan, untilUptime: wakeDeadline) else {
+                        throw FanControlHardwareError.operationFailed
+                    }
                 }
             }
         }
@@ -230,88 +245,6 @@ final class FanControlHardware {
                                   temperatures: readTemperatures())
     }
 
-    /// Returns the fans to the firmware for a system check without touching
-    /// their targets, so the first value the firmware writes shows up as a
-    /// change. Gives back the targets the curve had set, or nil when automatic
-    /// mode did not stick (the caller then performs a full restore).
-    func handToFirmware() -> [Double]? {
-        guard let fans = try? discoverControlledFans(),
-              activeTargets.count == fans.count else { return nil }
-        let previous = activeTargets
-        for fan in fans { _ = setMode(0, for: fan, attempts: 20) }
-        if let forceTest = forceTestKey() { _ = setByte(0, for: forceTest, attempts: 20) }
-        let automatic = fans.allSatisfy { fan in
-            (try? modeValue(fan.mode)).map(FanControlPolicy.isAutomaticMode) == true
-        }
-        let forceTestOff = forceTestKey().map { (try? byteValue($0)) == 0 } ?? true
-        return automatic && forceTestOff ? previous : nil
-    }
-
-    /// Takes back fans handed to the firmware a moment ago. They are still
-    /// spinning, so the stopped-fan start (a protective maximum target held
-    /// for seconds) is never needed here; this only re-asserts manual mode.
-    func resumeCooling(level: Int) throws -> [FanControlFanReading] {
-        let fans = try discoverControlledFans()
-        let targets = try fans.map { fan -> Double in
-            guard let target = FanControlPolicy.coolingTargetRPM(
-                minimum: fan.minimumRPM,
-                maximum: fan.maximumRPM,
-                level: level
-            ) else { throw FanControlHardwareError.operationFailed }
-            return target
-        }
-        var manual = true
-        for (fan, target) in zip(fans, targets) {
-            if !writeManualPair(for: fan, target: target) { manual = false }
-        }
-        if manual {
-            Thread.sleep(forTimeInterval: 0.1)
-            manual = fans.allSatisfy { (try? modeValue($0.mode)) == 1 }
-        }
-        if !manual {
-            guard let forceTest = forceTestKey(),
-                  setByte(1, for: forceTest, attempts: 20) else {
-                throw FanControlHardwareError.operationFailed
-            }
-            for fan in fans {
-                let deadline = ProcessInfo.processInfo.systemUptime + 3
-                guard setMode(1, for: fan, untilUptime: deadline) else {
-                    throw FanControlHardwareError.operationFailed
-                }
-            }
-        }
-        for (fan, target) in zip(fans, targets) {
-            guard setTargetRPM(target, for: fan, attempts: 10) else {
-                throw FanControlHardwareError.operationFailed
-            }
-        }
-        guard verifyCooling(fans, targets: targets, attempts: 10) else {
-            throw FanControlHardwareError.operationFailed
-        }
-        activeTargets = targets
-        return try readings(for: fans)
-    }
-
-    /// What the firmware asks for while it drives the fans. Only valid in
-    /// automatic mode. The actual speed is left out on purpose: right after a
-    /// handover it still carries the speed the curve was running.
-    func systemDemandReadings() throws -> [FanControlFanReading] {
-        let fans = try discoverControlledFans()
-        return try fans.map { fan in
-            guard try FanControlPolicy.isAutomaticMode(modeValue(fan.mode)),
-                  let target = client.readValue(fan.target),
-                  FanControlPolicy.validReading(target) else {
-                throw FanControlHardwareError.operationFailed
-            }
-            return FanControlFanReading(index: fan.index,
-                                        actualRPM: 0,
-                                        minimumRPM: fan.minimumRPM,
-                                        maximumRPM: fan.maximumRPM,
-                                        targetRPM: target,
-                                        isManuallyControlled: false)
-        }
-    }
-
     func coolingIsIntact() -> Bool {
         guard let fans = try? discoverControlledFans() else { return false }
         return verifyCooling(fans, targets: activeTargets)
@@ -326,6 +259,11 @@ final class FanControlHardware {
             packageReadings: temperatureReadings(keys.package).map(\.value),
             platform: temperaturePlatform
         )
+    }
+
+    func readBatteryTemperature() -> Double? {
+        let keys = discoverTemperatureKeys()
+        return temperatureReadings(keys.battery).map(\.value).max()
     }
 
     // MARK: - Discovery
@@ -400,6 +338,7 @@ final class FanControlHardware {
     private static let gpuKeyNames = [
         "Tg0P", "Tg1P", "Tg0D", "Tg1D", "Tg0F", "Tg1F", "Tg05", "Tg0r", "Tg1r",
     ]
+    private static let batteryKeyNames = ["TB0T", "TB1T", "TB2T"]
 
     private func discoverTemperatureKeys() -> TemperatureKeys {
         if let temperatureKeys { return temperatureKeys }
@@ -415,7 +354,8 @@ final class FanControlHardware {
         let result = TemperatureKeys(
             cpu: cpu,
             gpu: Self.gpuKeyNames.compactMap { client.key(named: $0) },
-            package: Self.packageKeyNames.compactMap { client.key(named: $0) }
+            package: Self.packageKeyNames.compactMap { client.key(named: $0) },
+            battery: Self.batteryKeyNames.compactMap { client.key(named: $0) }
         )
         temperatureKeys = result
         return result

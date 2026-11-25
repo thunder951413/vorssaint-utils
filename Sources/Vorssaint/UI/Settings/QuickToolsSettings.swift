@@ -12,11 +12,13 @@ struct QuickToolsSettings: View {
     @ObservedObject private var launcher = QuickLauncherService.shared
     @ObservedObject private var cameraPreview = CameraPreviewService.shared
     @ObservedObject private var scratchpad = ScratchpadService.shared
+    @ObservedObject private var dispatchHub = DispatchHubService.shared
     @ObservedObject private var brightness = BrightnessService.shared
     @AppStorage(DefaultsKey.quickLauncherShortcutEnabled) private var launcherShortcutEnabled = true
     @AppStorage(DefaultsKey.micMuteShortcutEnabled) private var micShortcutEnabled = false
     @AppStorage(DefaultsKey.cameraPreviewShortcutEnabled) private var cameraShortcutEnabled = false
     @AppStorage(DefaultsKey.scratchpadShortcutEnabled) private var scratchpadShortcutEnabled = false
+    @AppStorage(DefaultsKey.dispatchHubShortcutEnabled) private var dispatchHubShortcutEnabled = false
     @AppStorage(DefaultsKey.scratchpadRetention) private var scratchpadRetention = ScratchpadRetention.never.rawValue
     @AppStorage(DefaultsKey.scratchpadCloseOnClickOutside) private var scratchpadCloseOnClickOutside = true
     @AppStorage(DefaultsKey.scratchpadBackgroundOpacity) private var scratchpadBackgroundOpacity = 0.0
@@ -219,6 +221,36 @@ struct QuickToolsSettings: View {
                     Text(FeatureStrings.scratchpad(l10n.language).pageTitle)
                 }
                 .settingsSectionAnchor(.scratchpad)
+            }
+
+            if AppFeature.dispatchHub.isAvailable {
+                Section {
+                    Button {
+                        DispatchHubService.shared.show()
+                    } label: {
+                        Label(FeatureStrings.dispatchHub(l10n.language).openButton,
+                              systemImage: "tray.and.arrow.down")
+                    }
+                    Text(FeatureStrings.dispatchHub(l10n.language).panelCaption)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Toggle(l10n.s.quickToolShortcutToggle, isOn: $dispatchHubShortcutEnabled)
+                        .onChange(of: dispatchHubShortcutEnabled) { _, _ in
+                            DispatchHubService.shared.syncWithPreferences()
+                        }
+                    ShortcutPreferenceRow(role: .dispatchHub,
+                                          isEnabled: dispatchHubShortcutEnabled) {
+                        DispatchHubService.shared.syncWithPreferences()
+                    }
+                    if dispatchHubShortcutEnabled, dispatchHub.shortcutRegistrationFailed {
+                        Text(l10n.s.shortcutUnavailable)
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                } header: {
+                    Text(FeatureStrings.dispatchHub(l10n.language).pageTitle)
+                }
+                .settingsSectionAnchor(.dispatchHub)
             }
 
             if AppFeature.cleaningMode.isAvailable {

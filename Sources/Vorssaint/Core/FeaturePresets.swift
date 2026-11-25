@@ -91,7 +91,7 @@ extension AppFeature {
         switch self {
         case .scrollInverter, .scrollHorizontal, .focusFollowsMouse, .smoothScroll, .windowMaximizer, .middleClick,
              .mouseNavigation, .mouseButtonShortcuts, .mouseClickDebounce,
-             .dockPreview, .dockClick, .shelf:
+             .dockPreview, .dockClick, .shelf, .menuBarHider:
             return .mouse
         case .switcher, .keyboardDebounce, .finderCutPaste, .finderRename, .superKey, .quitWindowProtection:
             return .keyboard
@@ -125,7 +125,7 @@ extension AppFeature {
         case .mouseAcceleration, .pastePlain, .soundOutputSwitcher, .micMute,
              .musicBlock, .bluetoothSleep, .keepAwake, .brightness, .quickLauncher, .quickToggles, .colorPicker,
              .screenOCR, .cleaningMode, .mediaTools, .cleaner, .uninstaller, .homebrew, .screenshot,
-             .cameraPreview, .scratchpad, .commandBar, .screenRecorder, .fanControl,
+             .cameraPreview, .scratchpad, .dispatchHub, .commandBar, .screenRecorder, .fanControl,
              .diskImageInstaller, .killProcess, .portManager, .appHotkeys:
             return .idle
         case .appUpdates:

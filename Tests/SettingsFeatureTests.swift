@@ -151,6 +151,11 @@ enum SettingsFeatureTests {
                 && backupKeys.contains(DefaultsKey.appHotkeysEntries)
                 && backupKeys.contains(DefaultsKey.panelControlAppHotkeys),
                "app hotkeys bindings and preferences travel with the settings backup")
+        suite.expect(backupKeys.contains(DefaultsKey.menuBarHiderEnabled)
+                && backupKeys.contains(DefaultsKey.menuBarHiderShowTriggerIcon)
+                && backupKeys.contains(DefaultsKey.menuBarHiderShowOnEmptyClick)
+                && backupKeys.contains(DefaultsKey.menuBarHiderAssignments),
+               "menu bar hider assignments and preferences travel with the settings backup")
         suite.expect(backupKeys.contains(DefaultsKey.mouseButtonShortcutsEnabled)
                 && backupKeys.contains(DefaultsKey.mouseButtonShortcuts)
                 && backupKeys.contains(DefaultsKey.panelControlMouseButtonShortcuts),

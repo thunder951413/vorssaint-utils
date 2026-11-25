@@ -16,9 +16,14 @@ let package = Package(
             name: "VMStatisticsCompat",
             path: "Sources/VMStatisticsCompat"
         ),
+        .target(
+            name: "MenuBarVisibilityBridge",
+            path: "Sources/MenuBarVisibilityBridge",
+            publicHeadersPath: "include"
+        ),
         .executableTarget(
             name: "Vorssaint",
-            dependencies: ["VMStatisticsCompat", "HIDEventSystem"],
+            dependencies: ["VMStatisticsCompat", "HIDEventSystem", "MenuBarVisibilityBridge"],
             path: "Sources/Vorssaint"
         )
     ]

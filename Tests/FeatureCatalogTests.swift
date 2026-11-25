@@ -271,7 +271,7 @@ enum FeatureCatalogTests {
 
         // MARK: Features hub catalog
 
-        suite.expect(AppFeature.allCases.count == 71, "feature catalog has 71 features")
+        suite.expect(AppFeature.allCases.count == 73, "feature catalog has 73 features")
         suite.expect(Set(AppFeature.allCases.map(\.rawValue)).count == AppFeature.allCases.count,
                "feature ids are unique")
         suite.expect(AppFeature.allCases.map(\.rawValue) == [
@@ -284,7 +284,7 @@ enum FeatureCatalogTests {
             "keepAwake", "brightness", "extraBrightness", "bluetoothSleep", "displayColor",
             "quickLauncher", "quickToggles", "colorPicker", "screenOCR", "cleaningMode", "mediaTools",
             "cleaner", "uninstaller", "homebrew", "appUpdates", "screenshot", "cameraPreview",
-            "radialMenu", "scratchpad", "commandBar", "screenRecorder", "killProcess", "portManager", "notch", "notchCalendar", "notchNotifications", "notchGestures", "notchTimer", "notchAccessories", "notchLyrics", "notchQueue", "notchLiveEqualizer", "notchDownloads",
+            "radialMenu", "scratchpad", "dispatchHub", "commandBar", "screenRecorder", "killProcess", "portManager", "menuBarHider", "notch", "notchCalendar", "notchNotifications", "notchGestures", "notchTimer", "notchAccessories", "notchLyrics", "notchQueue", "notchLiveEqualizer", "notchDownloads",
             "monitorCPU", "monitorGPU", "monitorMemory", "monitorNetwork", "monitorDisk", "monitorPower",
             "fanControl",
         ], "feature ids are stable (they persist inside availability keys)")
@@ -731,17 +731,48 @@ enum FeatureCatalogTests {
                                  maximumRPM: 5_800, targetRPM: 2_000,
                                  isManuallyControlled: false)
         ]
+        let takeoverFloor = FanControlPolicy.floorCoolingLevel(fans: takeoverFans)
         suite.expect(!FanControlPolicy.shouldTakeOver(level: 0, fans: takeoverFans)
                 && FanControlPolicy.shouldTakeOver(level: 100, fans: takeoverFans)
-                && FanControlPolicy.floorCoolingLevel(fans: takeoverFans) == 15
-                && FanControlPolicy.appliedCoolingLevel(10, floorLevel: 15) == 15
-                && FanControlPolicy.appliedCoolingLevel(100, floorLevel: 15) == 100,
-               "takeover only raises the captured system floor and emergency cooling ignores it")
+                && takeoverFloor == 20
+                && (FanControlPolicy.coolingTargetRPM(minimum: 1_200, maximum: 5_800,
+                                                      level: takeoverFloor) ?? 0) >= 2_000
+                && FanControlPolicy.appliedCoolingLevel(10, floorLevel: takeoverFloor) == 20
+                && FanControlPolicy.appliedCoolingLevel(100, floorLevel: takeoverFloor) == 100,
+               "captured system floor rounds up so takeover never drops below system RPM")
         suite.expect(!FanControlPolicy.shouldTakeOver(level: 15, fans: takeoverFans)
                 && FanControlPolicy.shouldTakeOver(level: 20, fans: takeoverFans),
                "above the threshold the system keeps control until the curve wants clearly more")
-        suite.expect(FanControlPolicy.shouldHandBack(requestedLevel: 10, floorLevel: 15)
-                && !FanControlPolicy.shouldHandBack(requestedLevel: 15, floorLevel: 15)
+        let stoppedFans = [
+            FanControlFanReading(index: 0, actualRPM: 0, minimumRPM: 1_350,
+                                 maximumRPM: 5_777, targetRPM: 0,
+                                 isManuallyControlled: false)
+        ]
+        suite.expect(!FanControlPolicy.shouldTakeOver(level: 0, fans: stoppedFans)
+                && FanControlPolicy.shouldTakeOver(level: 5, fans: stoppedFans)
+                && FanControlPolicy.floorCoolingLevel(fans: stoppedFans) == 0,
+               "stopped fans stay under system control at zero percent and wake at five percent")
+        let asymmetricFans = [
+            FanControlFanReading(index: 0, actualRPM: 1_800, minimumRPM: 1_350,
+                                 maximumRPM: 5_777, targetRPM: 1_800,
+                                 isManuallyControlled: false),
+            FanControlFanReading(index: 1, actualRPM: 3_600, minimumRPM: 1_350,
+                                 maximumRPM: 5_777, targetRPM: 3_600,
+                                 isManuallyControlled: false)
+        ]
+        suite.expect(!FanControlPolicy.shouldTakeOver(level: 25, fans: asymmetricFans)
+                && FanControlPolicy.shouldTakeOver(level: 60, fans: asymmetricFans)
+                && FanControlPolicy.floorCoolingLevel(fans: asymmetricFans) == 55,
+               "dual-fan takeover requires beating every fan so a cooler side cannot slow a hotter side")
+        let alreadyMaxFans = [
+            FanControlFanReading(index: 0, actualRPM: 5_777, minimumRPM: 1_350,
+                                 maximumRPM: 5_777, targetRPM: 5_777,
+                                 isManuallyControlled: false)
+        ]
+        suite.expect(!FanControlPolicy.shouldTakeOver(level: 100, fans: alreadyMaxFans),
+               "emergency level does not hijack macOS when fans are already at maximum speed")
+        suite.expect(FanControlPolicy.shouldHandBack(requestedLevel: 10, floorLevel: 20)
+                && !FanControlPolicy.shouldHandBack(requestedLevel: 20, floorLevel: 20)
                 && !FanControlPolicy.shouldHandBack(requestedLevel: 0, floorLevel: 0)
                 && !FanControlPolicy.shouldHandBack(requestedLevel: 100, floorLevel: 100),
                "a curve hands back once it wants less than the system ran, never at emergency")
@@ -749,36 +780,77 @@ enum FeatureCatalogTests {
                 && !FanControlPolicy.curveHoldElapsed(startedAt: 100, now: 129)
                 && FanControlPolicy.curveHoldElapsed(startedAt: 100, now: 130),
                "a fresh takeover holds control for the minimum duration")
-        suite.expect(!FanControlPolicy.systemCheckDue(lastCheck: nil, controlStarted: nil, now: 500,
-                                                      referenceTemperature: 70, temperature: 90)
-                && !FanControlPolicy.systemCheckDue(lastCheck: nil, controlStarted: 100, now: 119,
-                                                    referenceTemperature: 70, temperature: 80)
-                && FanControlPolicy.systemCheckDue(lastCheck: nil, controlStarted: 100, now: 120,
-                                                   referenceTemperature: 70, temperature: 72)
-                && !FanControlPolicy.systemCheckDue(lastCheck: 200, controlStarted: 100, now: 300,
-                                                    referenceTemperature: 70, temperature: 71.5)
-                && !FanControlPolicy.systemCheckDue(lastCheck: 200, controlStarted: 100, now: 300,
-                                                    referenceTemperature: 70, temperature: 60)
-                && FanControlPolicy.systemCheckDue(lastCheck: 200, controlStarted: 100, now: 380,
-                                                   referenceTemperature: 70, temperature: 60),
-               "a running curve re-checks the firmware when the sensor warms, plus a slow backstop")
-        let curveTargets = [3_040.0, 3_040.0]
-        let unchangedFirmware = curveTargets.enumerated().map { index, target in
-            FanControlFanReading(index: index, actualRPM: 0, minimumRPM: 1_200,
-                                 maximumRPM: 5_800, targetRPM: target,
-                                 isManuallyControlled: false)
-        }
-        var movedFirmware = unchangedFirmware
-        movedFirmware[1] = FanControlFanReading(index: 1, actualRPM: 0, minimumRPM: 1_200,
-                                                maximumRPM: 5_800, targetRPM: 3_500,
-                                                isManuallyControlled: false)
-        suite.expect(!FanControlPolicy.firmwareResponded(previousTargets: curveTargets,
-                                                         fans: unchangedFirmware)
-                && FanControlPolicy.firmwareResponded(previousTargets: curveTargets,
-                                                      fans: movedFirmware)
-                && !FanControlPolicy.firmwareResponded(previousTargets: [3_040],
-                                                       fans: movedFirmware),
-               "a check sees the firmware answer as soon as any fan target moves")
+        suite.expect(!FanControlPolicy.thermalStateBlocksTakeover(.nominal)
+                && !FanControlPolicy.thermalStateBlocksTakeover(.fair)
+                && FanControlPolicy.thermalStateBlocksTakeover(.serious)
+                && FanControlPolicy.thermalStateBlocksTakeover(.critical),
+               "serious and critical thermal pressure block automatic takeover")
+        suite.expectClose(FanControlPolicy.smoothedTemperature(previous: nil, sample: 70),
+                          70, "temperature smoothing seeds from the first reading")
+        suite.expectClose(FanControlPolicy.smoothedTemperature(previous: 70, sample: 80),
+                          72.5, "warming uses responsive exponential smoothing")
+        suite.expectClose(FanControlPolicy.smoothedTemperature(previous: 80, sample: 70),
+                          78.8, "cooling decays gently so brief lulls do not pump the fans")
+        let quietDesktopReadings: [FanControlTemperatureReading] = [
+            .init(source: .packageCPU, celsius: 45.6),
+            .init(source: .averageCPU, celsius: 62.1),
+            .init(source: .hottestCPU, celsius: 72.4),
+            .init(source: .averageSoC, celsius: 60.1),
+            .init(source: .hottestSoC, celsius: 72.4),
+            .init(source: .hottestGPU, celsius: 54.4),
+        ]
+        suite.expect(FanControlPolicy.safetyCoolingLevel(temperatures: quietDesktopReadings,
+                                                         batteryTemperature: 31.5,
+                                                         thermalState: .nominal) == 0,
+               "normal desktop temperatures stay clear of the multi-sensor safety floor")
+        suite.expect(FanControlPolicy.safetyCoolingLevel(
+                    temperatures: [.init(source: .packageCPU, celsius: 65),
+                                   .init(source: .hottestGPU, celsius: 80)],
+                    batteryTemperature: 32,
+                    thermalState: .nominal) == 50
+                && FanControlPolicy.safetyCoolingLevel(
+                    temperatures: [.init(source: .averageCPU, celsius: 80)],
+                    thermalState: .nominal) == 50
+                && FanControlPolicy.safetyCoolingLevel(
+                    temperatures: [.init(source: .hottestCPU, celsius: 95)],
+                    thermalState: .nominal) == 100
+                && FanControlPolicy.safetyCoolingLevel(
+                    temperatures: quietDesktopReadings,
+                    batteryTemperature: 43,
+                    thermalState: .nominal) == 60
+                && FanControlPolicy.safetyCoolingLevel(
+                    temperatures: quietDesktopReadings,
+                    thermalState: .fair) == FanControlPolicy.safetyFairThermalFloor
+                && FanControlPolicy.safetyCoolingLevel(
+                    temperatures: quietDesktopReadings,
+                    thermalState: .serious) == 100,
+               "multi-sensor safety floor protects hot GPU, CPU, battery and thermal pressure without firmware handovers")
+        let rampSmall = FanControlPolicy.nextCoolingLevel(
+            current: 20, desired: 30, now: 10, lastChangeAt: 9, stepDownCandidateSince: nil)
+        let rampLarge = FanControlPolicy.nextCoolingLevel(
+            current: 20, desired: 60, now: 10, lastChangeAt: 9, stepDownCandidateSince: nil)
+        let rampUrgent = FanControlPolicy.nextCoolingLevel(
+            current: 20, desired: 100, now: 10, lastChangeAt: 9.5, stepDownCandidateSince: nil,
+            urgent: true)
+        let downStart = FanControlPolicy.nextCoolingLevel(
+            current: 40, desired: 25, now: 10, lastChangeAt: 9, stepDownCandidateSince: nil)
+        let downWait = FanControlPolicy.nextCoolingLevel(
+            current: 40, desired: 25, now: 14, lastChangeAt: 9,
+            stepDownCandidateSince: downStart.stepDownCandidateSince)
+        let downStep = FanControlPolicy.nextCoolingLevel(
+            current: 40, desired: 25, now: 15, lastChangeAt: 9,
+            stepDownCandidateSince: downWait.stepDownCandidateSince)
+        let downDone = FanControlPolicy.nextCoolingLevel(
+            current: 30, desired: 25, now: 20, lastChangeAt: 15,
+            stepDownCandidateSince: 15)
+        suite.expect(rampSmall.level == 25 && rampSmall.stepDownCandidateSince == nil
+                && rampLarge.level == 30
+                && rampUrgent.level == 100
+                && downStart.level == 40 && downStart.stepDownCandidateSince == 10
+                && downWait.level == 40 && downWait.stepDownCandidateSince == 10
+                && downStep.level == 35 && downStep.stepDownCandidateSince == 15
+                && downDone.level == 25 && downDone.stepDownCandidateSince == nil,
+               "level transitions ramp up smoothly, jump on emergency, and dwell before gliding down")
         let firmwareAsksMore = [
             FanControlFanReading(index: 0, actualRPM: 0, minimumRPM: 1_200,
                                  maximumRPM: 5_800, targetRPM: 3_500,
@@ -787,7 +859,7 @@ enum FeatureCatalogTests {
         suite.expect(!FanControlPolicy.shouldTakeOver(level: 40, fans: firmwareAsksMore)
                 && FanControlPolicy.shouldTakeOver(level: 55, fans: firmwareAsksMore)
                 && FanControlPolicy.floorCoolingLevel(fans: firmwareAsksMore) == 50,
-               "a check hands back when the firmware already asks for more than the curve")
+               "takeover defers when the firmware target already covers the curve")
         let defaultCurve = FanControlConfiguration.defaultCurve
         let duplicateCurves = [defaultCurve,
                                FanControlCurve(sensor: .hottestCPU, points: defaultCurve.points)]

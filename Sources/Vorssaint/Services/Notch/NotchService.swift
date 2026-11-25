@@ -296,6 +296,12 @@ final class NotchService: ObservableObject {
         MenuBarMetric.allCases.contains { $0.detailKind == metric && $0.feature.isAvailable }
     }
 
+    /// True when the Dynamic Island is running and occupies `point` (AppKit screen coordinates).
+    func containsMenuBarPoint(_ point: CGPoint) -> Bool {
+        guard running, let host = windowHost else { return false }
+        return host.contains(point) || host.containsHover(point)
+    }
+
     func stop(restoreCapture: Bool = true) {
         NotchLyricsService.shared.stop()
         NotchFileToolsService.shared.stop()

@@ -5,6 +5,7 @@ This repository is a personal enhanced fork of [vorssaint/vorssaint-utils](https
 ## Fork-only enhancements
 
 - **App Hotkeys:** Manico-style global per-app shortcuts to launch, summon, hide, or cycle windows for favorite apps, with one-click Dock import.
+- **Menu Bar Hider (macOS 27+):** Native `MenuBarClientCore` third-party menu bar icon hiding adapted from Ice/Thaw (GPL-3.0), with a floating hidden-items bar supporting left/right click forwarding, keyboard navigation, empty menu bar space clicking, smart/timed auto-rehide, and macOS 27.2 Date/Clock Notification Center pass-through.
 - **Trackpad Multi-Touch Gestures & Keyboard Automation:** 2–5 finger swipes and 4–5 finger pinches/spreads with palm and misfire rejection, plus clean global chord key remaps (per-app scope, keyDown/keyUp, repeat, Schema v2 rules).
 - **Screen Color Filter & DDC Dimming:** Sun-scheduled tint wheel and color overlay in Displays, plus persistent software dimming for DDC monitors.
 - **Custom Fan Control Curves:** Follow a selected temperature sensor with an adjustable acceleration factor while handing control back whenever firmware demands higher cooling.

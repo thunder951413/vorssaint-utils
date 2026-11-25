@@ -289,7 +289,9 @@ final class FeatureRuntime: ObservableObject {
             else { NotchCalendarService.shared.stop() }
         },
         .scratchpad: { ScratchpadService.shared.syncWithPreferences() },
+        .dispatchHub: { DispatchHubService.shared.syncWithPreferences() },
         .commandBar: { CommandBarService.shared.syncWithPreferences() },
+        .menuBarHider: { MainActor.assumeIsolated { MenuBarHiderService.shared.syncWithPreferences() } },
         .cleaner: {
             CleanerScheduler.shared.syncWithPreferences()
             WhatsAppDownloadScheduler.shared.syncWithPreferences()
@@ -337,6 +339,9 @@ extension AppFeature {
         case .fanControl:
             return FanControlHardware.hasControllableFan
                 ? nil : FeatureStrings.fanControl(L10n.shared.language).noFans
+        case .menuBarHider:
+            return MenuBarHiderSupport.isOSSupported
+                ? nil : FeatureStrings.menuBarHider(L10n.shared.language).unsupportedMacOS
         default:
             return nil
         }

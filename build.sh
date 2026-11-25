@@ -223,6 +223,7 @@ fi
 SDK_COMPAT_FLAGS=()
 VM_STATISTICS_COMPAT_FLAGS=(-I Sources/VMStatisticsCompat)
 HID_EVENT_SYSTEM_FLAGS=(-I Sources/HIDEventSystem)
+MENU_BAR_VISIBILITY_FLAGS=(-I Sources/MenuBarVisibilityBridge)
 if [[ "$SDK" == "$PINNED_SDK" ]]; then
     # Swift 6.4 can read the SDK 26 interfaces when given their compiler version.
     SDK_COMPAT_FLAGS=(-Xfrontend -interface-compiler-version -Xfrontend 6.3.2)
@@ -321,12 +322,15 @@ if (( TEST )); then
         Sources/Vorssaint/Core/RecorderShareStrings.swift
         Sources/Vorssaint/Core/CameraPreviewStrings.swift
         Sources/Vorssaint/Core/ScratchpadStrings.swift
+        Sources/Vorssaint/Core/DispatchHubStrings.swift
         Sources/Vorssaint/Core/FinderRenameStrings.swift
         Sources/Vorssaint/Core/CommandBarStrings.swift
         Sources/Vorssaint/Core/FeedbackStrings.swift
         Sources/Vorssaint/Core/RadialMenuStrings.swift
         Sources/Vorssaint/Core/AppHotkeysStrings.swift
         Sources/Vorssaint/Services/AppHotkeys/AppHotkeysSupport.swift
+        Sources/Vorssaint/Core/MenuBarHiderStrings.swift
+        Sources/Vorssaint/Services/MenuBarHider/MenuBarHiderSupport.swift
         Sources/Vorssaint/Core/MenuBarAppearanceStrings.swift
         Sources/Vorssaint/Core/AppAppearance.swift
         Sources/Vorssaint/Core/AppearanceStrings.swift
@@ -525,19 +529,27 @@ APP_SOURCES=(Sources/Vorssaint/**/*.swift)
 if (( DEV )); then
     APP_OBJECT_DIR="build/objects/$EXECUTABLE"
     mkdir -p build "$APP_OBJECT_DIR"
+    MENU_BAR_VISIBILITY_OBJ="$APP_OBJECT_DIR/MenuBarVisibilityBridge.o"
+    clang -fobjc-arc -arch arm64 -mmacosx-version-min=14.0 -isysroot "$SDK" \
+        -c Sources/MenuBarVisibilityBridge/MenuBarVisibilityBridge.m \
+        -o "$MENU_BAR_VISIBILITY_OBJ"
     APP_OUTPUT_FILE_MAP="$APP_OBJECT_DIR/output-file-map.json"
     write_swift_output_file_map "$APP_OUTPUT_FILE_MAP" "$APP_OBJECT_DIR" "${APP_SOURCES[@]}"
     swiftc "${APP_OPTIMIZATION_FLAGS[@]}" -incremental -j "$(sysctl -n hw.logicalcpu)" \
         -output-file-map "$APP_OUTPUT_FILE_MAP" \
-        -target "$TARGET" -sdk "$SDK" "${SDK_COMPAT_FLAGS[@]}" "${VM_STATISTICS_COMPAT_FLAGS[@]}" "${HID_EVENT_SYSTEM_FLAGS[@]}" \
+        -target "$TARGET" -sdk "$SDK" "${SDK_COMPAT_FLAGS[@]}" "${VM_STATISTICS_COMPAT_FLAGS[@]}" "${HID_EVENT_SYSTEM_FLAGS[@]}" "${MENU_BAR_VISIBILITY_FLAGS[@]}" \
         "${BUILD_VARIANT_FLAGS[@]}" \
-        "${APP_SOURCES[@]}" -o "build/$EXECUTABLE"
+        "$MENU_BAR_VISIBILITY_OBJ" "${APP_SOURCES[@]}" -o "build/$EXECUTABLE"
 else
     rm -rf build
     mkdir -p build
+    MENU_BAR_VISIBILITY_OBJ="build/MenuBarVisibilityBridge.o"
+    clang -O2 -fobjc-arc -arch arm64 -mmacosx-version-min=14.0 -isysroot "$SDK" \
+        -c Sources/MenuBarVisibilityBridge/MenuBarVisibilityBridge.m \
+        -o "$MENU_BAR_VISIBILITY_OBJ"
     swiftc "${APP_OPTIMIZATION_FLAGS[@]}" -target "$TARGET" -sdk "$SDK" \
-        "${SDK_COMPAT_FLAGS[@]}" "${VM_STATISTICS_COMPAT_FLAGS[@]}" "${HID_EVENT_SYSTEM_FLAGS[@]}" "${BUILD_VARIANT_FLAGS[@]}" \
-        "${APP_SOURCES[@]}" -o "build/$EXECUTABLE"
+        "${SDK_COMPAT_FLAGS[@]}" "${VM_STATISTICS_COMPAT_FLAGS[@]}" "${HID_EVENT_SYSTEM_FLAGS[@]}" "${MENU_BAR_VISIBILITY_FLAGS[@]}" "${BUILD_VARIANT_FLAGS[@]}" \
+        "$MENU_BAR_VISIBILITY_OBJ" "${APP_SOURCES[@]}" -o "build/$EXECUTABLE"
 fi
 
 echo "▸ Compiling protected fan helper…"

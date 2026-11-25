@@ -116,6 +116,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             guard StatusItemAnchorSupport.isTrustworthyStatusFrame(frame) else { return nil }
             return frame
         }
+        MenuBarHiderService.shared.vorssaintStatusItemContainsPoint = { [weak self] point in
+            self?.statusController.containsStatusItem(at: point) == true
+        }
+        MenuBarHiderService.shared.onOpenSettings = { [weak self] in
+            SettingsRouter.shared.page = .menuBarHider
+            self?.openSettingsWindow()
+        }
 
         setUpPopover()
         bindManagers()
@@ -157,7 +164,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
                     .dockPreview, .finderCutPaste, .finderRename, .autoQuit, .appHotkeys, .dockClick,
                     .middleClick, .windowMaximizer, .keyboardDebounce, .windowLayout,
                     .textSnippets, .brightness, .radialMenu, .mouseButtonShortcuts,
-                    .mouseClickDebounce, .superKey, .quitWindowProtection, .mixer, .notch,
+                    .mouseClickDebounce, .superKey, .quitWindowProtection, .mixer, .notch, .menuBarHider,
                 ])
                 TrackpadGestureService.shared.syncWithPreferences()
             }
@@ -249,6 +256,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
 
     func applicationWillTerminate(_ notification: Notification) {
         isTerminating = true
+        MenuBarHiderService.shared.stopBeforeTermination()
         if AppFeature.notch.isAvailable { NotchService.shared.stop(restoreCapture: false) }
         // Quitting properly means the start worked, whenever it happened.
         endStartupWatch()
@@ -290,6 +298,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         AudioInputDeviceManager.shared.stop()
         // Flushes any scratchpad edit still inside the save debounce.
         ScratchpadService.shared.suspend()
+        DispatchHubService.shared.suspend()
         // Every macOS shortcut a feature took over goes back now, whichever
         // feature held it; not all of them suspend here.
         SystemShortcutTakeover.restoreAll()
@@ -1292,6 +1301,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             menu.addItem(shelfItem)
         }
 
+        MainActor.assumeIsolated {
+            let hider = MenuBarHiderService.shared
+            if hider.isFeatureActive {
+                let hiderStrings = FeatureStrings.menuBarHider(L10n.shared.language)
+                let toggleBarItem = NSMenuItem(
+                    title: hider.isBarPresented
+                        ? hiderStrings.menuCollapseHidden : hiderStrings.menuExpandHidden,
+                    action: #selector(menuToggleHiddenBar),
+                    keyEquivalent: ""
+                )
+                toggleBarItem.target = self
+                menu.addItem(toggleBarItem)
+
+                let pauseHidingItem = NSMenuItem(
+                    title: hider.isHidingPaused
+                        ? hiderStrings.menuResumeHiding : hiderStrings.menuPauseHiding,
+                    action: #selector(menuToggleMenuBarHidingPaused),
+                    keyEquivalent: ""
+                )
+                pauseHidingItem.target = self
+                menu.addItem(pauseHidingItem)
+            }
+        }
+
         let updatesItem = NSMenuItem(title: strings.menuCheckUpdates, action: #selector(menuCheckUpdates), keyEquivalent: "")
         updatesItem.target = self
         menu.addItem(updatesItem)
@@ -1332,6 +1365,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
 
     @objc private func menuOpenShelf() {
         ShelfService.shared.expandDocked()
+    }
+
+    @MainActor @objc private func menuToggleHiddenBar() {
+        MenuBarHiderService.shared.toggleBar(section: .hidden)
+    }
+
+    @MainActor @objc private func menuToggleMenuBarHidingPaused() {
+        MenuBarHiderService.shared.toggleHidingPaused()
     }
 
     @objc private func menuCheckUpdates() {

@@ -412,6 +412,22 @@ enum CommandBarCatalog {
                 shortcut: roleShortcut(.scratchpad),
                 run: { _ in afterBeat { ScratchpadService.shared.show() } }))
         }
+        if AppFeature.dispatchHub.isAvailable {
+            let hubStrings = FeatureStrings.dispatchHub(language)
+            entries.append(CommandBarEntry(
+                id: "action.dispatchHub",
+                title: hubStrings.pageTitle,
+                subtitle: area(.dispatchHub, under: hubStrings.pageTitle),
+                icon: .symbol("tray.and.arrow.down"),
+                shortcut: roleShortcut(.dispatchHub),
+                run: { _ in afterBeat { DispatchHubService.shared.show() } }))
+            entries.append(CommandBarEntry(
+                id: "action.dispatchHub.clipboard",
+                title: hubStrings.quickCollectClipboardTitle,
+                subtitle: area(.dispatchHub, under: hubStrings.pageTitle),
+                icon: .symbol("paperplane"),
+                run: { _ in afterBeat { DispatchHubService.shared.dispatchClipboardNow() } }))
+        }
         if AppFeature.cameraPreview.isAvailable {
             entries.append(CommandBarEntry(
                 id: "action.cameraPreview",
